@@ -1,0 +1,8 @@
+{
+  "name": "PactPilot Card",
+  "render_readme": true,
+  "filename": "pactpilot-card.js",
+  "content_in_root": true,
+  "country": ["DE", "US"],
+  "homeassistant": "2024.1.0"
+}
