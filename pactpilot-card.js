@@ -105,10 +105,99 @@ class PactPilotCard extends HTMLElement {
     return this._t(status);
   }
 
+  _getContracts() {
+    if (!this._hass) return [];
+    const contracts = [];
+    for (const [entityId, stateObj] of Object.entries(this._hass.states)) {
+      if (!entityId.startsWith('input_text.pactpilot_')) continue;
+      // Check for pactpilot label
+      const labels = stateObj.attributes?.labels || [];
+      // Also accept entities that match the naming pattern even without label
+      const data = this._parseYaml(stateObj.state);
+      if (!data || !data.name) continue;
+      contracts.push({
+        entity_id: entityId,
+        ...data,
+        cost: parseFloat(data.cost) || 0
+      });
+    }
+    // Sort: active first, then by next_payment date
+    contracts.sort((a, b) => {
+      if (a.status !== b.status) {
+        return a.status === 'active' ? -1 : a.status === 'pending' ? 0 : 1;
+      }
+      if (a.next_payment && b.next_payment) {
+        return new Date(a.next_payment) - new Date(b.next_payment);
+      }
+      return a.name.localeCompare(b.name);
+    });
+    return contracts;
+  }
+
+  _parseYaml(str) {
+    if (!str || typeof str !== 'string') return null;
+    try {
+      // Simple YAML parser for our flat structure
+      const result = {};
+      const lines = str.split('\n');
+      let currentKey = null;
+      let multilineValue = [];
+      let inMultiline = false;
+
+      for (const line of lines) {
+        if (inMultiline) {
+          if (line.startsWith('  ') || line.startsWith('\t') || line === '') {
+            multilineValue.push(line.replace(/^  /, ''));
+            continue;
+          } else {
+            result[currentKey] = multilineValue.join('\n').trim();
+            multilineValue = [];
+            inMultiline = false;
+            currentKey = null;
+          }
+        }
+        const colonIdx = line.indexOf(':');
+        if (colonIdx > 0 && !inMultiline) {
+          const key = line.substring(0, colonIdx).trim();
+          const value = line.substring(colonIdx + 1).trim();
+          if (value === '|' || value === '|-' || value === '>') {
+            currentKey = key;
+            multilineValue = [];
+            inMultiline = true;
+          } else {
+            result[key] = value.replace(/^"(.*)"$/, '$1').replace(/^'(.*)'$/, '$1');
+          }
+        }
+      }
+      if (inMultiline && currentKey) {
+        result[currentKey] = multilineValue.join('\n').trim();
+      }
+      return result;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  _slugify(name) {
+    return name
+      .toLowerCase()
+      .replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue')
+      .replace(/ß/g, 'ss')
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/^_|_$/g, '')
+      .substring(0, 50);
+  }
+
   _render() {
     if (!this._hass) return;
     this._rendered = true;
-    this.innerHTML = `<ha-card><div class="card-content">${this._t('title')}</div></ha-card>`;
+    const contracts = this._getContracts();
+    this.innerHTML = `<ha-card>
+      <div class="card-content">
+        <h3>${this._t('title')}</h3>
+        <p>${contracts.length} ${contracts.length === 1 ? 'Vertrag' : 'Verträge'}</p>
+      </div>
+    </ha-card>`;
   }
 }
 
