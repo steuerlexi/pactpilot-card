@@ -1,32 +1,84 @@
 # PactPilot Card
 
-[![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg?style=for-the-badge)](https://github.com/hacs/integration)
-[![License](https://img.shields.io/github/license/steuerlexi/pactpilot-card.svg?style=for-the-badge)](LICENSE)
+Custom Lovelace card for Home Assistant — manage contracts and subscriptions directly in your dashboard.
 
-A Home Assistant Lovelace custom card for managing contracts and subscriptions.
+## Features
 
----
+- 📋 Grid view with contract tiles (logo, name, provider, cost, cycle, due date)
+- 🔍 Category filtering (Insurance, Streaming, Cloud, Housing, etc.)
+- 📄 Detail view with markdown-formatted contract details
+- ✏️ Full CRUD — create, edit, and delete contracts from the dashboard
+- 🌐 German + English (auto-detected via HA locale)
+- 🎨 Dark mode support
+- 🤖 Each contract is an `input_text` entity — usable in automations
 
 ## Installation
 
-### HACS (Recommended)
+### HACS (recommended)
 
-1. Open HACS → **Frontend** → **Custom repositories**
-2. Add repository: `https://github.com/steuerlexi/pactpilot-card`
-   - Category: **Lovelace**
-3. Click **Download** on the PactPilot Card entry
-4. Refresh your browser cache (Ctrl+Shift+R)
+1. Add this repository to HACS as a custom repository
+2. Install "PactPilot Card"
+3. Add the resource: HACS → PactPilot Card → Add to Lovelace
 
 ### Manual
 
-1. Copy `pactpilot-card.js` to `/config/www/`
-2. Add to Lovelace resources:
-   ```yaml
-   url: /local/pactpilot-card.js
-   type: module
-   ```
+1. Copy `pactpilot-card.js` to `/config/www/pactpilot-card.js`
+2. Add Lovelace resource: `/local/pactpilot-card.js` (type: JavaScript Module)
 
----
+## Configuration
+
+```yaml
+type: custom:pactpilot-card
+# All fields below are optional:
+categories: []       # Custom categories (overrides defaults)
+default_view: grid   # "grid" (default)
+```
+
+Contracts are auto-discovered — any `input_text` helper with label `pactpilot` is shown.
+
+## Creating Contracts
+
+Click **＋ Neu** in the card header. Fill in the form and save. The card creates an `input_text` helper with your contract data as YAML.
+
+## Automation Example
+
+```yaml
+alias: "PactPilot — Payment Due Warning"
+trigger:
+  - platform: template
+    value_template: >
+      {% for e in states.input_text
+           | selectattr('entity_id', 'search', 'input_text.pactpilot_') %}
+        {% set data = e.state | from_yaml %}
+        {% if data.next_payment
+              and (data.next_payment | as_datetime - now()).days == 3 %}
+          true
+        {% endif %}
+      {% endfor %}
+action:
+  - service: notify.notify
+    data:
+      message: "⚠️ A contract payment is due in 3 days"
+```
+
+## Data Format
+
+Each contract is stored as YAML in an `input_text` entity:
+
+```yaml
+name: HUK Car Insurance
+category: Versicherung
+provider: HUK24
+cost: 45.00
+cycle: jährlich
+next_payment: "2026-12-01"
+logo: mdi:car
+details: |
+  ## Coverage
+  - Full comprehensive
+  - Liability 100M €
+status: active
+```
 
 ## License
 
