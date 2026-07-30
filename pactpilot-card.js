@@ -8,6 +8,9 @@ class PactPilotCard extends HTMLElement {
     this.config = {};
     this._activeCategory = 'Alle';
     this._customCategories = null;
+    // View state so state updates don't force us back to grid
+    this._view = 'grid';
+    this._viewContract = null;
   }
 
   connectedCallback() {
@@ -682,9 +685,20 @@ class PactPilotCard extends HTMLElement {
   }
 
   _bindDetailEvents(contract) {
-    this.querySelector('#pp-back-btn')?.addEventListener('click', () => this._render('grid'));
-    this.querySelector('#pp-edit-btn')?.addEventListener('click', () => this._render('form', contract));
-    this.querySelector('#pp-delete-btn')?.addEventListener('click', () => this._confirmDelete(contract));
+    // Single delegated click handler; onclick replaces any previous handler on re-render.
+    this._container.onclick = (e) => {
+      if (e.target.closest('#pp-back-btn')) {
+        this._render('grid');
+        return;
+      }
+      if (e.target.closest('#pp-edit-btn')) {
+        this._render('form', contract);
+        return;
+      }
+      if (e.target.closest('#pp-delete-btn')) {
+        this._confirmDelete(contract);
+      }
+    };
   }
 
   _renderForm(editContract = null) {
@@ -766,15 +780,16 @@ class PactPilotCard extends HTMLElement {
   }
 
   _bindFormEvents(editContract) {
-    this.querySelector('#pp-form-cancel')?.addEventListener('click', () => {
-      if (editContract) this._render('detail', editContract);
-      else this._render('grid');
-    });
-    this.querySelector('#pp-form-cancel-btn')?.addEventListener('click', () => {
-      if (editContract) this._render('detail', editContract);
-      else this._render('grid');
-    });
-    this.querySelector('#pp-form-save')?.addEventListener('click', () => this._saveContract(editContract));
+    this._container.onclick = (e) => {
+      if (e.target.closest('#pp-form-cancel') || e.target.closest('#pp-form-cancel-btn')) {
+        if (editContract) this._render('detail', editContract);
+        else this._render('grid');
+        return;
+      }
+      if (e.target.closest('#pp-form-save')) {
+        this._saveContract(editContract);
+      }
+    };
   }
 
   _serializeContract() {
@@ -937,16 +952,22 @@ status: ${this._yamlQuote(contract.status)}`;
     return this._container;
   }
 
-  _render(view = 'grid', selectedContract = null) {
+  _render(view = this._view, selectedContract = this._viewContract) {
     if (!this._hass) return;
     this._ensureContainer();
 
-    if (view === 'detail' && selectedContract) {
-      this._renderDetail(selectedContract);
+    // Persist view state so state updates don't rip us out of detail/form
+    this._view = view;
+    this._viewContract = selectedContract || null;
+
+    if (this._view === 'detail' && this._viewContract) {
+      this._renderDetail(this._viewContract);
       return;
     }
-    if (view === 'form') {
-      this._renderForm(selectedContract);
+    if (this._view === 'form') {
+      // Don't re-render an open form on state updates; it would wipe user input and focus.
+      if (this._container.querySelector('#pp-form-save')) return;
+      this._renderForm(this._viewContract);
       return;
     }
 
@@ -1021,28 +1042,27 @@ status: ${this._yamlQuote(contract.status)}`;
   }
 
   _bindEvents() {
-    // Category pill clicks
-    this.querySelectorAll('.pp-pill').forEach(pill => {
-      pill.addEventListener('click', (e) => {
-        this._activeCategory = e.currentTarget.dataset.category;
+    // Single delegated click handler; onclick replaces any previous handler on re-render.
+    this._container.onclick = (e) => {
+      const pill = e.target.closest('.pp-pill');
+      if (pill) {
+        this._activeCategory = pill.dataset.category;
         this._render('grid');
-      });
-    });
+        return;
+      }
 
-    // Tile clicks → detail view
-    this.querySelectorAll('.pp-tile').forEach(tile => {
-      tile.addEventListener('click', (e) => {
-        const entityId = e.currentTarget.dataset.entity;
+      const tile = e.target.closest('.pp-tile');
+      if (tile) {
+        const entityId = tile.dataset.entity;
         const contract = this._getContracts().find(c => c.entity_id === entityId);
         if (contract) this._render('detail', contract);
-      });
-    });
+        return;
+      }
 
-    // Add button
-    const addBtn = this.querySelector('#pp-add-btn');
-    if (addBtn) {
-      addBtn.addEventListener('click', () => this._render('form'));
-    }
+      if (e.target.closest('#pp-add-btn')) {
+        this._render('form');
+      }
+    };
   }
 
   getCardSize() {
