@@ -38,6 +38,9 @@ class PactPilotCard extends HTMLElement {
         logo: 'Logo / Icon',
         name: 'Name',
         status: 'Status',
+        contracts_zero: 'Keine Verträge',
+        contracts_one: '1 Vertrag',
+        contracts: 'Verträge',
         cycles: {
           monatlich: 'monatlich',
           vierteljährlich: 'vierteljährlich',
@@ -68,6 +71,9 @@ class PactPilotCard extends HTMLElement {
         logo: 'Logo / Icon',
         name: 'Name',
         status: 'Status',
+        contracts_zero: 'No contracts',
+        contracts_one: '1 contract',
+        contracts: 'contracts',
         cycles: {
           monatlich: 'monthly',
           vierteljährlich: 'quarterly',
@@ -110,9 +116,6 @@ class PactPilotCard extends HTMLElement {
     const contracts = [];
     for (const [entityId, stateObj] of Object.entries(this._hass.states)) {
       if (!entityId.startsWith('input_text.pactpilot_')) continue;
-      // Check for pactpilot label
-      const labels = stateObj.attributes?.labels || [];
-      // Also accept entities that match the naming pattern even without label
       const data = this._parseYaml(stateObj.state);
       if (!data || !data.name) continue;
       contracts.push({
@@ -121,11 +124,11 @@ class PactPilotCard extends HTMLElement {
         cost: parseFloat(data.cost) || 0
       });
     }
-    // Sort: active first, then by next_payment date
+    // Sort: active first, then pending, then cancelled; then by next_payment date; then by name
+    const STATUS_ORDER = { active: 0, pending: 1, cancelled: 2 };
     contracts.sort((a, b) => {
-      if (a.status !== b.status) {
-        return a.status === 'active' ? -1 : a.status === 'pending' ? 0 : 1;
-      }
+      const statusDiff = (STATUS_ORDER[a.status] ?? 3) - (STATUS_ORDER[b.status] ?? 3);
+      if (statusDiff !== 0) return statusDiff;
       if (a.next_payment && b.next_payment) {
         return new Date(a.next_payment) - new Date(b.next_payment);
       }
@@ -192,10 +195,19 @@ class PactPilotCard extends HTMLElement {
     if (!this._hass) return;
     this._rendered = true;
     const contracts = this._getContracts();
+    const count = contracts.length;
+    let countText;
+    if (count === 0) {
+      countText = this._t('contracts_zero');
+    } else if (count === 1) {
+      countText = this._t('contracts_one');
+    } else {
+      countText = `${count} ${this._t('contracts')}`;
+    }
     this.innerHTML = `<ha-card>
       <div class="card-content">
         <h3>${this._t('title')}</h3>
-        <p>${contracts.length} ${contracts.length === 1 ? 'Vertrag' : 'Verträge'}</p>
+        <p>${countText}</p>
       </div>
     </ha-card>`;
   }
