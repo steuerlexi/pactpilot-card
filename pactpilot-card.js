@@ -341,6 +341,103 @@ class PactPilotCard extends HTMLElement {
           color: var(--secondary-text-color, #727272);
         }
         .pp-empty-icon { font-size: 48px; margin-bottom: 12px; opacity: 0.5; }
+        .pp-back {
+          font-size: 12px;
+          color: var(--secondary-text-color, #727272);
+          cursor: pointer;
+          margin-bottom: 16px;
+          display: flex;
+          align-items: center;
+          gap: 4px;
+        }
+        .pp-back:hover { color: var(--primary-text-color, #212121); }
+        .pp-hero {
+          display: flex;
+          align-items: center;
+          gap: 14px;
+          margin-bottom: 18px;
+        }
+        .pp-hero-logo {
+          width: 56px;
+          height: 56px;
+          border-radius: 12px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          background: var(--secondary-background-color, #f5f5f5);
+          flex-shrink: 0;
+        }
+        .pp-hero-info h3 { margin: 0 0 2px 0; font-size: 18px; font-weight: 600; }
+        .pp-hero-provider { font-size: 13px; color: var(--secondary-text-color, #727272); }
+        .pp-status-badge {
+          display: inline-block;
+          padding: 2px 10px;
+          border-radius: 12px;
+          font-size: 11px;
+          font-weight: 600;
+          margin-top: 4px;
+        }
+        .pp-status-badge.active { background: rgba(76,175,80,0.15); color: #4caf50; }
+        .pp-status-badge.cancelled { background: rgba(244,67,54,0.15); color: #f44336; }
+        .pp-status-badge.pending { background: rgba(255,152,0,0.15); color: #ff9800; }
+        .pp-meta {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 10px;
+          margin-bottom: 18px;
+        }
+        .pp-meta-item {
+          background: var(--secondary-background-color, #f5f5f5);
+          border-radius: 8px;
+          padding: 10px 12px;
+        }
+        .pp-meta-label {
+          font-size: 10px;
+          text-transform: uppercase;
+          color: var(--secondary-text-color, #727272);
+          letter-spacing: 0.5px;
+          margin-bottom: 2px;
+        }
+        .pp-meta-value { font-size: 15px; font-weight: 600; }
+        .pp-meta-value.price { color: var(--primary-color, #03a9f4); }
+        .pp-details {
+          background: var(--secondary-background-color, #f5f5f5);
+          border-radius: 10px;
+          padding: 14px 16px;
+          margin-bottom: 16px;
+        }
+        .pp-details h4 {
+          margin: 0 0 10px 0;
+          font-size: 13px;
+          text-transform: uppercase;
+          color: var(--secondary-text-color, #727272);
+          letter-spacing: 0.5px;
+        }
+        .pp-markdown { font-size: 13px; line-height: 1.6; }
+        .pp-markdown h5 { font-size: 12px; color: var(--secondary-text-color, #727272); margin: 10px 0 4px 0; }
+        .pp-markdown ul { margin: 4px 0; padding-left: 18px; }
+        .pp-markdown li { margin: 2px 0; font-size: 12px; }
+        .pp-markdown code { background: rgba(0,0,0,0.08); padding: 1px 4px; border-radius: 3px; font-size: 11px; }
+        .pp-markdown a { color: var(--primary-color, #03a9f4); }
+        .pp-actions { display: flex; gap: 8px; }
+        .pp-btn {
+          flex: 1;
+          padding: 8px;
+          border-radius: 8px;
+          border: 1px solid var(--divider-color, rgba(0,0,0,0.12));
+          background: var(--card-background-color, #fff);
+          color: var(--primary-text-color, #212121);
+          font-size: 12px;
+          font-weight: 600;
+          cursor: pointer;
+          text-align: center;
+          transition: all 0.15s;
+        }
+        .pp-btn:hover { background: var(--secondary-background-color, #f5f5f5); }
+        .pp-btn.primary { background: var(--primary-color, #03a9f4); color: var(--text-primary-color, #fff); border-color: transparent; }
+        .pp-btn.primary:hover { opacity: 0.85; }
+        .pp-btn.danger { color: #f44336; border-color: rgba(244,67,54,0.3); }
+        .pp-btn.danger:hover { background: rgba(244,67,54,0.08); }
       </style>
     `;
   }
@@ -363,6 +460,114 @@ class PactPilotCard extends HTMLElement {
       day: '2-digit', month: '2-digit', year: 'numeric'
     });
   }
+  _renderMarkdown(md) {
+    if (!md || typeof md !== 'string') return '';
+    let html = md
+      // Headings
+      .replace(/^### (.+)$/gm, '<h5>$1</h5>')
+      .replace(/^## (.+)$/gm, '<h4>$1</h4>')
+      .replace(/^# (.+)$/gm, '<h3>$1</h3>')
+      // Bold
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      // Italic
+      .replace(/\*(.+?)\*/g, '<em>$1</em>')
+      // Inline code
+      .replace(/`([^`]+)`/g, '<code>$1</code>')
+      // Links
+      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>')
+      // Unordered lists
+      .replace(/^- (.+)$/gm, '<li>$1</li>')
+      // Horizontal rules
+      .replace(/^---$/gm, '<hr>')
+      // Line breaks
+      .replace(/\n\n/g, '</p><p>')
+      .replace(/\n/g, '<br>');
+
+    // Wrap list items
+    html = html.replace(/(<li>.*<\/li>)/s, (match) => {
+      if (!match.includes('<ul>')) return `<ul>${match}</ul>`;
+      return match;
+    });
+
+    return `<p>${html}</p>`;
+  }
+
+  _renderDetail(contract) {
+    let html = this._getStyles();
+
+    html += `<div class="pp-card">
+      <div class="pp-back" id="pp-back-btn">${this._t('back')}</div>
+
+      <div class="pp-hero">
+        <div class="pp-hero-logo">
+          ${contract.logo && contract.logo.startsWith('mdi:')
+            ? `<ha-icon icon="${contract.logo}" style="color:${this._getCategoryColor(contract.category)};--mdc-icon-size:32px"></ha-icon>`
+            : contract.logo && (contract.logo.startsWith('http') || contract.logo.startsWith('/'))
+              ? `<img src="${contract.logo}" alt="${contract.name}" style="width:48px;height:48px;object-fit:contain" onerror="this.style.display='none'">`
+              : `<ha-icon icon="${this._getCategoryIcon(contract.category)}" style="color:${this._getCategoryColor(contract.category)};--mdc-icon-size:32px"></ha-icon>`
+          }
+        </div>
+        <div class="pp-hero-info">
+          <h3>${contract.name}</h3>
+          <div class="pp-hero-provider">${contract.provider || ''}</div>
+          <span class="pp-status-badge ${contract.status}">${this._statusLabel(contract.status)}</span>
+        </div>
+      </div>
+
+      <div class="pp-meta">
+        <div class="pp-meta-item">
+          <div class="pp-meta-label">${this._t('cost')}</div>
+          <div class="pp-meta-value price">${contract.cost.toFixed(2).replace('.', ',')} €</div>
+        </div>
+        <div class="pp-meta-item">
+          <div class="pp-meta-label">${this._t('cycle')}</div>
+          <div class="pp-meta-value">${this._cycleLabel(contract.cycle)}</div>
+        </div>
+        <div class="pp-meta-item">
+          <div class="pp-meta-label">${this._t('next_payment')}</div>
+          <div class="pp-meta-value">${contract.next_payment ? this._formatDate(contract.next_payment) : '—'}</div>
+        </div>
+        <div class="pp-meta-item">
+          <div class="pp-meta-label">${this._t('category_label')}</div>
+          <div class="pp-meta-value">
+            <ha-icon icon="${this._getCategoryIcon(contract.category)}" style="width:16px;height:16px;margin-right:4px;vertical-align:-3px;color:${this._getCategoryColor(contract.category)}"></ha-icon>
+            ${contract.category}
+          </div>
+        </div>
+      </div>`;
+
+    if (contract.details) {
+      html += `<div class="pp-details">
+        <h4>${this._t('details_label')}</h4>
+        <div class="pp-markdown">${this._renderMarkdown(contract.details)}</div>
+      </div>`;
+    }
+
+    html += `<div class="pp-actions">
+      <button class="pp-btn primary" id="pp-edit-btn">${this._t('edit')}</button>
+      <button class="pp-btn danger" id="pp-delete-btn">${this._t('delete')}</button>
+    </div>`;
+
+    html += `</div>`;
+    this.innerHTML = html;
+    this._bindDetailEvents(contract);
+  }
+
+  _bindDetailEvents(contract) {
+    this.querySelector('#pp-back-btn')?.addEventListener('click', () => this._render('grid'));
+    this.querySelector('#pp-edit-btn')?.addEventListener('click', () => this._render('form', contract));
+    this.querySelector('#pp-delete-btn')?.addEventListener('click', () => this._confirmDelete(contract));
+  }
+
+  _renderForm(contract) {
+    // Stub for Task 6
+    this._render('grid');
+  }
+
+  _confirmDelete(contract) {
+    // Stub for Task 6
+    console.warn('_confirmDelete not implemented yet');
+  }
 
   _computeMonthlyCost(contract) {
     const cost = parseFloat(contract.cost) || 0;
@@ -377,6 +582,16 @@ class PactPilotCard extends HTMLElement {
   _render(view = 'grid', selectedContract = null) {
     if (!this._hass) return;
     this._currentView = view;
+
+    if (view === 'detail' && selectedContract) {
+      this._renderDetail(selectedContract);
+      return;
+    }
+    if (view === 'form') {
+      this._renderForm(selectedContract);
+      return;
+    }
+
     this._selectedContract = selectedContract;
     this._activeCategory = this._activeCategory || 'Alle';
 
