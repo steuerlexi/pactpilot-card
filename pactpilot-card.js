@@ -767,12 +767,15 @@ status: ${contract.status}`;
   }
 
   async _deleteContract(contract) {
+    let deleted = false;
+
+    // Delete the contract entity
     try {
-      // Try WebSocket delete
       await this._hass.connection.sendMessagePromise({
-        type: 'input_text/delete',
-        input_text_id: contract.entity_id
+        type: 'config/entity_registry/remove',
+        entity_id: contract.entity_id
       });
+      deleted = true;
     } catch (e) {
       // Fallback: fire event for MCP-based deletion
       const event = new CustomEvent('pactpilot-delete', {
@@ -784,14 +787,18 @@ status: ${contract.status}`;
     // Also try to remove associated template sensor
     const sensorId = contract.entity_id.replace('input_text.pactpilot_', 'sensor.pactpilot_faellig_');
     try {
-      await this._hass.callService('homeassistant', 'remove_entity', {
+      await this._hass.connection.sendMessagePromise({
+        type: 'config/entity_registry/remove',
         entity_id: sensorId
       });
+      deleted = true;
     } catch (e) {
       // Sensor might not exist — ignore
     }
 
-    this._render('grid');
+    if (deleted) {
+      this._render('grid');
+    }
   }
 
   _computeMonthlyCost(contract) {
