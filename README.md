@@ -10,7 +10,8 @@ Custom Lovelace card for Home Assistant — manage contracts and subscriptions d
 - ✏️ Full CRUD — create, edit, and delete contracts from the dashboard
 - 🔗 Clickable **URL** field per contract (opens provider page)
 - 📝 Long contract details stored across multiple `input_text` helpers (bypasses the 255-char single-helper limit)
-- 🖱 Reliable click handling even on Home Assistant icons inside Shadow DOM
+- 🖱 Reliable click handling with composed-path routing and render deduplication
+- 🎨 Logo supports all Home Assistant icon packs (`mdi:`, `hue:`, `custom:`, …) plus image URLs
 - 🌐 German + English (auto-detected via HA locale)
 - 🎨 Dark mode support
 - 🤖 Each contract is an `input_text` entity — usable in automations

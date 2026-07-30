@@ -1,4 +1,4 @@
-// PactPilot Card for Home Assistant — version 1.0.6
+// PactPilot Card for Home Assistant — version 1.0.7
 class PactPilotCard extends HTMLElement {
   constructor() {
     super();
@@ -48,6 +48,8 @@ class PactPilotCard extends HTMLElement {
     if (this.config.categories && Array.isArray(this.config.categories)) {
       this._customCategories = this.config.categories;
     }
+    // Force a re-render on next hass update because config (e.g. categories) changed.
+    this._stateHash = null;
   }
 
   get _categories() {
@@ -55,6 +57,13 @@ class PactPilotCard extends HTMLElement {
   }
 
   set hass(hass) {
+    if (!hass) return;
+    // Home Assistant calls set hass on every state update. Re-rendering the entire
+    // grid each time replaces the DOM under the user's cursor and can swallow clicks.
+    // Only re-render when a PactPilot-related entity (contract or detail chunk) changes.
+    const newHash = this._computeStateHash(hass);
+    if (this._stateHash === newHash) return;
+    this._stateHash = newHash;
     this._hass = hass;
     try {
       this._render();
@@ -62,6 +71,16 @@ class PactPilotCard extends HTMLElement {
       const target = this._container || this;
       target.innerHTML = `<ha-card>Error: ${e.message}</ha-card>`;
     }
+  }
+
+  _computeStateHash(hass) {
+    const parts = [];
+    for (const [entityId, stateObj] of Object.entries(hass.states || {})) {
+      if (entityId.startsWith('input_text.pactpilot_')) {
+        parts.push(`${entityId}=${stateObj?.state || ''}:${stateObj?.last_updated || ''}:${stateObj?.last_changed || ''}`);
+      }
+    }
+    return parts.sort().join('|');
   }
 
   _findEventTarget(e, selector) {
@@ -555,6 +574,7 @@ class PactPilotCard extends HTMLElement {
           height: 32px;
           object-fit: contain;
         }
+        .pp-tile-logo * { pointer-events: none; }
         .pp-tile-name {
           font-size: 13px;
           font-weight: 600;
@@ -776,6 +796,16 @@ class PactPilotCard extends HTMLElement {
     return cat ? cat.color : '#9e9e9e';
   }
 
+  _isIconReference(str) {
+    // Any pack prefix like mdi:, hue:, phu:, custom:brand-icon etc.
+    // URLs and local paths are excluded.
+    return typeof str === 'string' && /^[a-z0-9_-]+:/.test(str) && !/^https?:/i.test(str);
+  }
+
+  _isImageUrl(str) {
+    return typeof str === 'string' && (/^https?:\/\//i.test(str) || str.startsWith('/'));
+  }
+
   _formatDate(dateStr) {
     if (!dateStr) return '';
     const d = new Date(dateStr);
@@ -880,9 +910,9 @@ class PactPilotCard extends HTMLElement {
 
       <div class="pp-hero">
         <div class="pp-hero-logo">
-          ${contract.logo && contract.logo.startsWith('mdi:')
+          ${this._isIconReference(contract.logo)
             ? `<ha-icon icon="${this._escapeHtml(contract.logo)}" style="color:${this._getCategoryColor(contract.category)};--mdc-icon-size:32px"></ha-icon>`
-            : contract.logo && (contract.logo.startsWith('http') || contract.logo.startsWith('/'))
+            : this._isImageUrl(contract.logo)
               ? `<img src="${this._escapeHtml(contract.logo)}" alt="${this._escapeHtml(contract.name)}" style="width:48px;height:48px;object-fit:contain" onerror="this.style.display='none'">`
               : `<ha-icon icon="${this._getCategoryIcon(contract.category)}" style="color:${this._getCategoryColor(contract.category)};--mdc-icon-size:32px"></ha-icon>`
           }
@@ -1305,9 +1335,9 @@ status: ${q(contract.status)}`;
           <div class="pp-tile" data-entity="${c.entity_id}">
             <div class="pp-status-dot ${c.status}"></div>
             <div class="pp-tile-logo">
-              ${c.logo && c.logo.startsWith('mdi:')
+              ${this._isIconReference(c.logo)
                 ? `<ha-icon icon="${this._escapeHtml(c.logo)}" style="color:${this._getCategoryColor(c.category)}"></ha-icon>`
-                : c.logo && (c.logo.startsWith('http') || c.logo.startsWith('/'))
+                : this._isImageUrl(c.logo)
                   ? `<img src="${this._escapeHtml(c.logo)}" alt="${this._escapeHtml(c.name)}" onerror="this.style.display='none';this.nextElementSibling.style.display=''"><ha-icon icon="${this._getCategoryIcon(c.category)}" style="color:${this._getCategoryColor(c.category)};display:none"></ha-icon>`
                   : `<ha-icon icon="${this._getCategoryIcon(c.category)}" style="color:${this._getCategoryColor(c.category)}"></ha-icon>`
               }
