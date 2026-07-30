@@ -195,6 +195,12 @@ class PactPilotCard extends HTMLElement {
       .substring(0, 50);
   }
 
+  _escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
   _getStyles() {
     return `
       <style>
@@ -438,6 +444,36 @@ class PactPilotCard extends HTMLElement {
         .pp-btn.primary:hover { opacity: 0.85; }
         .pp-btn.danger { color: #f44336; border-color: rgba(244,67,54,0.3); }
         .pp-btn.danger:hover { background: rgba(244,67,54,0.08); }
+        .pp-form { }
+        .pp-field { margin-bottom: 12px; }
+        .pp-field label {
+          display: block;
+          font-size: 11px;
+          text-transform: uppercase;
+          color: var(--secondary-text-color, #727272);
+          letter-spacing: 0.5px;
+          margin-bottom: 4px;
+        }
+        .pp-field input, .pp-field select, .pp-field textarea {
+          width: 100%;
+          padding: 8px 10px;
+          border-radius: 6px;
+          border: 1px solid var(--divider-color, rgba(0,0,0,0.12));
+          background: var(--card-background-color, #fff);
+          color: var(--primary-text-color, #212121);
+          font-size: 13px;
+          font-family: inherit;
+          box-sizing: border-box;
+        }
+        .pp-field textarea {
+          min-height: 100px;
+          resize: vertical;
+          font-family: 'SF Mono', 'Fira Code', 'Roboto Mono', monospace;
+          font-size: 12px;
+          line-height: 1.5;
+        }
+        .pp-row { display: flex; gap: 10px; }
+        .pp-row .pp-field { flex: 1; }
       </style>
     `;
   }
@@ -559,9 +595,169 @@ class PactPilotCard extends HTMLElement {
     this.querySelector('#pp-delete-btn')?.addEventListener('click', () => this._confirmDelete(contract));
   }
 
-  _renderForm(contract) {
-    // Stub for Task 6
-    this._render('grid');
+  _renderForm(editContract = null) {
+    const isEdit = !!editContract;
+    let html = this._getStyles();
+
+    html += `<div class="pp-card">
+      <div class="pp-back" id="pp-form-cancel">${this._t('cancel')}</div>
+      <h3 style="margin:0 0 16px 0;font-size:16px">${isEdit ? '✏️ ' + editContract.name : this._t('new')}</h3>
+
+      <div class="pp-form">
+        <div class="pp-field">
+          <label>${this._t('name')} *</label>
+          <input type="text" id="pp-f-name" value="${isEdit ? this._escapeHtml(editContract.name) : ''}" required>
+        </div>
+
+        <div class="pp-row">
+          <div class="pp-field">
+            <label>${this._t('provider')}</label>
+            <input type="text" id="pp-f-provider" value="${isEdit ? this._escapeHtml(editContract.provider || '') : ''}">
+          </div>
+          <div class="pp-field">
+            <label>${this._t('category_label')} *</label>
+            <select id="pp-f-category">
+              ${PactPilotCard.CATEGORIES.map(c =>
+                `<option value="${c.id}" ${isEdit && editContract.category === c.id ? 'selected' : ''}>${c.icon ? c.id : c.id}</option>`
+              ).join('')}
+            </select>
+          </div>
+        </div>
+
+        <div class="pp-row">
+          <div class="pp-field">
+            <label>${this._t('cost')} *</label>
+            <input type="number" id="pp-f-cost" step="0.01" min="0" value="${isEdit ? editContract.cost : ''}" required>
+          </div>
+          <div class="pp-field">
+            <label>${this._t('cycle')}</label>
+            <select id="pp-f-cycle">
+              ${['monatlich','vierteljährlich','halbjährlich','jährlich'].map(c =>
+                `<option value="${c}" ${isEdit && editContract.cycle === c ? 'selected' : ''}>${this._cycleLabel(c)}</option>`
+              ).join('')}
+            </select>
+          </div>
+        </div>
+
+        <div class="pp-row">
+          <div class="pp-field">
+            <label>${this._t('next_payment')}</label>
+            <input type="date" id="pp-f-next-payment" value="${isEdit && editContract.next_payment ? editContract.next_payment : ''}">
+          </div>
+          <div class="pp-field">
+            <label>${this._t('status')}</label>
+            <select id="pp-f-status">
+              <option value="active" ${isEdit && editContract.status === 'active' ? 'selected' : ''}>&#9679; ${this._t('active')}</option>
+              <option value="cancelled" ${isEdit && editContract.status === 'cancelled' ? 'selected' : ''}>&#9679; ${this._t('cancelled')}</option>
+              <option value="pending" ${isEdit && editContract.status === 'pending' ? 'selected' : ''}>&#9679; ${this._t('pending')}</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="pp-field">
+          <label>${this._t('logo')}</label>
+          <input type="text" id="pp-f-logo" value="${isEdit ? this._escapeHtml(editContract.logo || '') : ''}" placeholder="mdi:car oder https://...">
+        </div>
+
+        <div class="pp-field">
+          <label>${this._t('details_label')} (Markdown)</label>
+          <textarea id="pp-f-details" rows="8">${isEdit ? this._escapeHtml(editContract.details || '') : ''}</textarea>
+        </div>
+
+        <div class="pp-actions" style="margin-top:16px">
+          <button class="pp-btn" id="pp-form-cancel-btn">${this._t('cancel')}</button>
+          <button class="pp-btn primary" id="pp-form-save">${this._t('save')}</button>
+        </div>
+      </div>
+    </div>`;
+
+    this.innerHTML = html;
+    this._bindFormEvents(editContract);
+  }
+
+  _bindFormEvents(editContract) {
+    this.querySelector('#pp-form-cancel')?.addEventListener('click', () => {
+      if (editContract) this._render('detail', editContract);
+      else this._render('grid');
+    });
+    this.querySelector('#pp-form-cancel-btn')?.addEventListener('click', () => {
+      if (editContract) this._render('detail', editContract);
+      else this._render('grid');
+    });
+    this.querySelector('#pp-form-save')?.addEventListener('click', () => this._saveContract(editContract));
+  }
+
+  _serializeContract() {
+    return {
+      name: this.querySelector('#pp-f-name')?.value?.trim() || '',
+      category: this.querySelector('#pp-f-category')?.value || 'Sonstiges',
+      provider: this.querySelector('#pp-f-provider')?.value?.trim() || '',
+      cost: parseFloat(this.querySelector('#pp-f-cost')?.value) || 0,
+      cycle: this.querySelector('#pp-f-cycle')?.value || 'monatlich',
+      next_payment: this.querySelector('#pp-f-next-payment')?.value || '',
+      logo: this.querySelector('#pp-f-logo')?.value?.trim() || '',
+      details: this.querySelector('#pp-f-details')?.value?.trim() || '',
+      status: this.querySelector('#pp-f-status')?.value || 'active'
+    };
+  }
+
+  _toYaml(contract) {
+    let yaml = `name: ${contract.name}
+category: ${contract.category}
+provider: ${contract.provider}
+cost: ${contract.cost}
+cycle: ${contract.cycle}
+next_payment: "${contract.next_payment}"
+logo: ${contract.logo}
+status: ${contract.status}`;
+
+    if (contract.details) {
+      yaml += `\ndetails: |\n  ${contract.details.replace(/\n/g, '\n  ')}`;
+    }
+    return yaml;
+  }
+
+  async _saveContract(editContract) {
+    const data = this._serializeContract();
+    if (!data.name) {
+      alert(this._t('name') + ' ist erforderlich');
+      return;
+    }
+
+    const saveBtn = this.querySelector('#pp-form-save');
+    if (saveBtn) {
+      saveBtn.disabled = true;
+      saveBtn.textContent = '...';
+    }
+
+    const yaml = this._toYaml(data);
+
+    try {
+      if (editContract) {
+        // Update existing
+        await this._hass.callService('input_text', 'set_value', {
+          entity_id: editContract.entity_id,
+          value: yaml
+        });
+      } else {
+        // Create new — fire event for external handler
+        const slug = this._slugify(data.name);
+        const event = new CustomEvent('pactpilot-create', {
+          detail: { name: data.name, slug, value: yaml }
+        });
+        window.dispatchEvent(event);
+      }
+    } catch (e) {
+      if (saveBtn) {
+        saveBtn.disabled = false;
+        saveBtn.textContent = this._t('save');
+      }
+      alert('Fehler beim Speichern: ' + e.message);
+      return;
+    }
+
+    // Return to grid after save
+    setTimeout(() => this._render('grid'), 500);
   }
 
   _confirmDelete(contract) {
