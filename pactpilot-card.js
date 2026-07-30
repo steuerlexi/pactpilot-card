@@ -761,8 +761,37 @@ status: ${contract.status}`;
   }
 
   _confirmDelete(contract) {
-    // Stub for Task 6
-    console.warn('_confirmDelete not implemented yet');
+    if (confirm(this._t('confirm_delete') + `\n\n"${contract.name}"`)) {
+      this._deleteContract(contract);
+    }
+  }
+
+  async _deleteContract(contract) {
+    try {
+      // Try WebSocket delete
+      await this._hass.connection.sendMessagePromise({
+        type: 'input_text/delete',
+        input_text_id: contract.entity_id
+      });
+    } catch (e) {
+      // Fallback: fire event for MCP-based deletion
+      const event = new CustomEvent('pactpilot-delete', {
+        detail: { entity_id: contract.entity_id }
+      });
+      window.dispatchEvent(event);
+    }
+
+    // Also try to remove associated template sensor
+    const sensorId = contract.entity_id.replace('input_text.pactpilot_', 'sensor.pactpilot_faellig_');
+    try {
+      await this._hass.callService('homeassistant', 'remove_entity', {
+        entity_id: sensorId
+      });
+    } catch (e) {
+      // Sensor might not exist — ignore
+    }
+
+    this._render('grid');
   }
 
   _computeMonthlyCost(contract) {
