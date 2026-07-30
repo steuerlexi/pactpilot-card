@@ -1,3 +1,4 @@
+// PactPilot Card for Home Assistant — version 1.0.6
 class PactPilotCard extends HTMLElement {
   constructor() {
     super();
@@ -63,16 +64,30 @@ class PactPilotCard extends HTMLElement {
     }
   }
 
+  _findEventTarget(e, selector) {
+    // Home Assistant icons are rendered in a Shadow DOM. A plain click target may
+    // live inside a shadow root, so closest() returns null. composedPath() walks the
+    // full event path across shadow boundaries and lets us reliably find elements.
+    if (e.composedPath) {
+      const path = e.composedPath();
+      for (const el of path) {
+        if (el === this || el === window || el === document) break;
+        if (el instanceof Element && el.matches && el.matches(selector)) return el;
+      }
+    }
+    return e.target.closest(selector);
+  }
+
   _handleClick(e) {
     // Grid view handlers
-    const pill = e.target.closest('.pp-pill');
+    const pill = this._findEventTarget(e, '.pp-pill');
     if (pill && this._view === 'grid') {
       this._activeCategory = pill.dataset.category;
       this._render('grid');
       return;
     }
 
-    const tile = e.target.closest('.pp-tile');
+    const tile = this._findEventTarget(e, '.pp-tile');
     if (tile && this._view === 'grid') {
       const entityId = tile.dataset.entity;
       const contract = this._getContracts().find(c => c.entity_id === entityId);
@@ -80,40 +95,47 @@ class PactPilotCard extends HTMLElement {
       return;
     }
 
-    const addBtn = e.target.closest('#pp-add-btn');
+    const addBtn = this._findEventTarget(e, '#pp-add-btn');
     if (addBtn && this._view === 'grid') {
       this._render('form');
       return;
     }
 
     // Detail view handlers
-    const backBtn = e.target.closest('#pp-back-btn');
+    const backBtn = this._findEventTarget(e, '#pp-back-btn');
     if (backBtn && this._view === 'detail') {
       this._render('grid');
       return;
     }
 
-    const editBtn = e.target.closest('#pp-edit-btn');
+    const editBtn = this._findEventTarget(e, '#pp-edit-btn');
     if (editBtn && this._view === 'detail' && this._viewContract) {
       this._render('form', this._viewContract);
       return;
     }
 
-    const deleteBtn = e.target.closest('#pp-delete-btn');
+    const deleteBtn = this._findEventTarget(e, '#pp-delete-btn');
     if (deleteBtn && this._view === 'detail' && this._viewContract) {
       this._confirmDelete(this._viewContract);
       return;
     }
 
+    const urlBtn = this._findEventTarget(e, '#pp-url-btn');
+    if (urlBtn && this._view === 'detail') {
+      // Real <a> with target="_blank" should handle itself, but guard for any
+      // delegated fallback that still reaches here.
+      return;
+    }
+
     // Form view handlers
-    const cancelBtn = e.target.closest('#pp-form-cancel, #pp-form-cancel-btn');
+    const cancelBtn = this._findEventTarget(e, '#pp-form-cancel, #pp-form-cancel-btn');
     if (cancelBtn && this._view === 'form') {
       if (this._viewContract) this._render('detail', this._viewContract);
       else this._render('grid');
       return;
     }
 
-    const saveBtn = e.target.closest('#pp-form-save');
+    const saveBtn = this._findEventTarget(e, '#pp-form-save');
     if (saveBtn && this._view === 'form') {
       e.preventDefault();
       this._saveContract(this._viewContract);
@@ -144,6 +166,8 @@ class PactPilotCard extends HTMLElement {
         category_label: 'Kategorie',
         provider: 'Anbieter',
         logo: 'Logo / Icon',
+        url: 'URL',
+        open_url: 'URL öffnen',
         name: 'Name',
         status: 'Status',
         contracts_zero: 'Keine Verträge',
@@ -181,6 +205,8 @@ class PactPilotCard extends HTMLElement {
         category_label: 'Category',
         provider: 'Provider',
         logo: 'Logo / Icon',
+        url: 'URL',
+        open_url: 'Open URL',
         name: 'Name',
         status: 'Status',
         contracts_zero: 'No contracts',
@@ -229,17 +255,101 @@ class PactPilotCard extends HTMLElement {
     return this._t(status);
   }
 
+  _contractSlug(entityId) {
+    const match = entityId.match(/^input_text\.pactpilot_(.+)$/);
+    return match ? match[1] : null;
+  }
+
+  _detailChunkEntityIds(slug) {
+    const ids = [];
+    for (let i = 0; i < 12; i++) {
+      ids.push(`input_text.pactpilot_${slug}_details_${i}`);
+    }
+    return ids;
+  }
+
+  _readDetailChunks(slug) {
+    if (!this._hass || !slug) return '';
+    const ids = this._detailChunkEntityIds(slug);
+    let parts = [];
+    for (const id of ids) {
+      const state = this._hass.states[id]?.state;
+      if (typeof state === 'string') {
+        parts.push(state);
+      }
+    }
+    return parts.join('');
+  }
+
+  async _writeDetailChunks(slug, details) {
+    if (!this._hass || !slug) return;
+    const CHUNK_MAX = 255;
+    const chunks = [];
+    for (let i = 0; i < (details || '').length; i += CHUNK_MAX) {
+      chunks.push(details.substring(i, i + CHUNK_MAX));
+    }
+    const ids = this._detailChunkEntityIds(slug);
+    const existing = {};
+    for (const id of ids) {
+      existing[id] = !!this._hass.states[id];
+    }
+
+    for (let i = 0; i < ids.length; i++) {
+      const id = ids[i];
+      const value = i < chunks.length ? chunks[i] : '';
+      if (value) {
+        if (existing[id]) {
+          await this._hass.callService('input_text', 'set_value', { entity_id: id, value });
+        } else {
+          await this._hass.connection.sendMessagePromise({
+            type: 'input_text/create',
+            name: `PactPilot ${slug} details ${i}`,
+            initial: value,
+            max: CHUNK_MAX,
+            min: 0,
+            mode: 'text'
+          });
+        }
+      } else if (existing[id]) {
+        // Clear unused chunk so old data doesn't leak into shorter notes.
+        await this._hass.callService('input_text', 'set_value', { entity_id: id, value: '' });
+      }
+    }
+  }
+
+  async _deleteDetailChunks(slug) {
+    if (!this._hass || !slug) return;
+    const ids = this._detailChunkEntityIds(slug);
+    for (const id of ids) {
+      if (this._hass.states[id]) {
+        try {
+          await this._hass.connection.sendMessagePromise({
+            type: 'config/entity_registry/remove',
+            entity_id: id
+          });
+        } catch (e) {
+          // Ignore: registry remove is best-effort.
+        }
+      }
+    }
+  }
+
   _getContracts() {
     if (!this._hass) return [];
     const contracts = [];
     for (const [entityId, stateObj] of Object.entries(this._hass.states)) {
       if (!entityId.startsWith('input_text.pactpilot_')) continue;
+      // Skip detail-chunk entities; they are merged into the main contract.
+      if (/_details_\d+$/.test(entityId)) continue;
       try {
         const data = PactPilotCard.parseYaml(stateObj.state);
         if (!data || !data.name) continue;
+        const slug = this._contractSlug(entityId);
+        const details = slug ? this._readDetailChunks(slug) : '';
         contracts.push({
           entity_id: entityId,
           ...data,
+          details: details || data.details || '',
           cost: parseFloat(data.cost) || 0
         });
       } catch (e) {
@@ -813,8 +923,11 @@ class PactPilotCard extends HTMLElement {
       </div>`;
     }
 
-    html += `<div class="pp-actions">
-      <button type="button" class="pp-btn primary" id="pp-edit-btn">${this._t('edit')}</button>
+    html += `<div class="pp-actions">`;
+    if (contract.url) {
+      html += `<a class="pp-btn primary" id="pp-url-btn" href="${this._escapeHtml(contract.url)}" target="_blank" rel="noopener noreferrer">${this._t('open_url')}</a>`;
+    }
+    html += `<button type="button" class="pp-btn${contract.url ? '' : ' primary'}" id="pp-edit-btn">${this._t('edit')}</button>
       <button type="button" class="pp-btn danger" id="pp-delete-btn">${this._t('delete')}</button>
     </div>`;
 
@@ -890,6 +1003,11 @@ class PactPilotCard extends HTMLElement {
         </div>
 
         <div class="pp-field">
+          <label>${this._t('url')}</label>
+          <input type="url" id="pp-f-url" value="${isEdit ? this._escapeHtml(editContract.url || '') : ''}" placeholder="https://...">
+        </div>
+
+        <div class="pp-field">
           <label>${this._t('details_label')} (Markdown)</label>
           <textarea id="pp-f-details" rows="8">${isEdit ? this._escapeHtml(editContract.details || '') : ''}</textarea>
         </div>
@@ -918,12 +1036,13 @@ class PactPilotCard extends HTMLElement {
       cycle: this.querySelector('#pp-f-cycle')?.value || 'monatlich',
       next_payment: this.querySelector('#pp-f-next-payment')?.value || '',
       logo: this.querySelector('#pp-f-logo')?.value?.trim() || '',
+      url: this.querySelector('#pp-f-url')?.value?.trim() || '',
       details: this.querySelector('#pp-f-details')?.value?.trim() || '',
       status: this.querySelector('#pp-f-status')?.value || 'active'
     };
   }
 
-  static toYamlStatic(contract) {
+  static toYamlStatic(contract, options = {}) {
     const q = PactPilotCard.yamlQuote;
     let yaml = `name: ${q(contract.name)}
 category: ${q(contract.category)}
@@ -934,7 +1053,12 @@ next_payment: "${contract.next_payment || ''}"
 logo: ${q(contract.logo)}
 status: ${q(contract.status)}`;
 
-    if (contract.details) {
+    if (contract.url) {
+      yaml += `\nurl: ${q(contract.url)}`;
+    }
+    // Details are stored in separate input_text chunks to bypass the 255-char
+    // input_text limit. Inline details are kept optional for tests/backward compat.
+    if (options.inlineDetails && contract.details) {
       yaml += `\ndetails: |\n  ${contract.details.replace(/\n/g, '\n  ')}`;
     }
     return yaml;
@@ -974,18 +1098,22 @@ status: ${q(contract.status)}`;
       saveBtn.textContent = '...';
     }
 
-    const yaml = PactPilotCard.toYamlStatic(data);
+    // Keep details out of the main YAML; input_text is limited to 255 chars.
+    // Details are stored in separate input_text chunks per contract.
+    const metadataOnly = { ...data, details: '' };
+    const yaml = PactPilotCard.toYamlStatic(metadataOnly);
 
-    // input_text helpers are limited to 255 characters.
     if (yaml.length > 255) {
       if (saveBtn) {
         saveBtn.disabled = false;
         saveBtn.textContent = this._t('save');
       }
-      this._showFormStatus(`YAML zu lang (${yaml.length}/255 Zeichen). Details verkürzen.`, 'error');
+      this._showFormStatus(`YAML zu lang (${yaml.length}/255 Zeichen). Felder kürzen.`, 'error');
       console.error('[pactpilot-card] YAML too long for input_text', yaml.length, yaml);
       return;
     }
+
+    let savedEntityId = editContract ? editContract.entity_id : null;
 
     try {
       if (editContract) {
@@ -1006,12 +1134,12 @@ status: ${q(contract.status)}`;
             mode: 'text'
           });
           // Try to assign the pactpilot label to the new entity
-          const newEntityId = typeof result === 'string' ? result : result?.entity_id;
-          if (newEntityId) {
+          savedEntityId = typeof result === 'string' ? result : result?.entity_id;
+          if (savedEntityId) {
             try {
               await this._hass.connection.sendMessagePromise({
                 type: 'config/entity_registry/update',
-                entity_id: newEntityId,
+                entity_id: savedEntityId,
                 labels: ['pactpilot']
               });
             } catch (labelErr) {
@@ -1021,11 +1149,18 @@ status: ${q(contract.status)}`;
         } catch (createErr) {
           // Fallback: fire event for external handler (MCP, automation)
           const slug = this._slugify(data.name);
+          savedEntityId = `input_text.pactpilot_${slug}`;
           const event = new CustomEvent('pactpilot-create', {
             detail: { name: data.name, slug, value: yaml }
           });
           window.dispatchEvent(event);
         }
+      }
+
+      // Persist the (possibly long) details into separate input_text chunks.
+      if (savedEntityId) {
+        const slug = this._contractSlug(savedEntityId) || this._slugify(data.name);
+        await this._writeDetailChunks(slug, data.details);
       }
     } catch (e) {
       if (saveBtn) {
@@ -1065,6 +1200,12 @@ status: ${q(contract.status)}`;
       });
       window.dispatchEvent(event);
       fallbackFired = true;
+    }
+
+    // Also try to remove associated detail chunks
+    const slug = this._contractSlug(contract.entity_id);
+    if (slug) {
+      await this._deleteDetailChunks(slug);
     }
 
     // Also try to remove associated template sensor

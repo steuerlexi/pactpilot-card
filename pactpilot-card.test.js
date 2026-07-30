@@ -91,16 +91,28 @@ const contract = {
   details: '## Paket\n- Ultra HD\n- 4 Screens',
   status: 'active'
 };
+// By default details are stored in chunks, so inline YAML does not contain them.
 const yamlOut = PactPilotCard.toYamlStatic(contract);
 const reparsed = PactPilotCard.parseYaml(yamlOut);
 assertEqual(reparsed.name, 'Netflix', 'roundtrip name');
 assertEqual(reparsed.category, 'Streaming', 'roundtrip category');
 assertEqual(reparsed.provider, 'Netflix Inc.', 'roundtrip provider with dot');
 assertEqual(reparsed.cost, '12.99', 'roundtrip cost');
-assertEqual(reparsed.details, contract.details, 'roundtrip details');
+assertEqual(reparsed.details, undefined, 'default YAML omits details (chunked storage)');
 
-// YAML length check
+// Inline details still work when explicitly requested.
+const yamlInline = PactPilotCard.toYamlStatic(contract, { inlineDetails: true });
+const reparsedInline = PactPilotCard.parseYaml(yamlInline);
+assertEqual(reparsedInline.details, contract.details, 'roundtrip inline details');
+
+// YAML length check (metadata-only should easily fit in 255 chars)
 assertTrue(yamlOut.length <= 255, `YAML length ${yamlOut.length} <= 255`);
+
+// URL field roundtrip
+const contractWithUrl = { ...contract, url: 'https://netflix.com/manage' };
+const yamlUrl = PactPilotCard.toYamlStatic(contractWithUrl);
+const reparsedUrl = PactPilotCard.parseYaml(yamlUrl);
+assertEqual(reparsedUrl.url, 'https://netflix.com/manage', 'roundtrip url');
 
 // Edge cases
 const yamlQuote = `name: "Sonder: Name"

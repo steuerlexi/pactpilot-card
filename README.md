@@ -8,6 +8,9 @@ Custom Lovelace card for Home Assistant — manage contracts and subscriptions d
 - 🔍 Category filtering (Insurance, Streaming, Cloud, Housing, etc.)
 - 📄 Detail view with markdown-formatted contract details
 - ✏️ Full CRUD — create, edit, and delete contracts from the dashboard
+- 🔗 Clickable **URL** field per contract (opens provider page)
+- 📝 Long contract details stored across multiple `input_text` helpers (bypasses the 255-char single-helper limit)
+- 🖱 Reliable click handling even on Home Assistant icons inside Shadow DOM
 - 🌐 German + English (auto-detected via HA locale)
 - 🎨 Dark mode support
 - 🤖 Each contract is an `input_text` entity — usable in automations
@@ -73,11 +76,11 @@ cost: 45.00
 cycle: jährlich
 next_payment: "2026-12-01"
 logo: mdi:car
-details: |
-  ## Coverage
-  - Full comprehensive
-  - Liability 100M €
+url: https://huk24.de
 status: active
+
+# Details are stored in separate input_text helpers (input_text.pactpilot_<name>_details_*)
+# to support more than 255 characters. They are merged automatically by the card.
 ```
 
 ## License
