@@ -1,0 +1,16 @@
+# AppDaemon module registration for the PactPilot Card backend.
+#
+# Deploy (one-time):
+#   1. Copy apps/pactpilot_backend.py  ->  /addon_configs/a0d7b954_appdaemon/apps/
+#   2. Append this block                 ->  /addon_configs/a0d7b954_appdaemon/apps/apps.yaml
+#   3. Restart the AppDaemon add-on (Settings -> Apps -> AppDaemon -> Restart)
+#
+# After the first deploy, editing the .py file hot-reloads automatically
+# (AppDaemon watches the apps dir).
+
+pactpilot_backend:
+  module: pactpilot_backend
+  class: PactPilotBackend
+  # Optional: override where the persistent contracts.json is stored.
+  # Default: /config/appdaemon_data/pactpilot/  (created automatically)
+  # data_dir: /config/appdaemon_data/pactpilot
