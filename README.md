@@ -14,7 +14,7 @@ Custom Lovelace card for Home Assistant — manage contracts and subscriptions d
 - 🎨 Logo supports all Home Assistant icon packs (`mdi:`, `hue:`, `custom:`, …) plus image URLs
 - 🌐 German + English (auto-detected via HA locale)
 - 🎨 Dark mode support
-- 🤖 Each contract is an `input_text` entity — usable in automations
+- 🤖 Each contract is a `sensor.pactpilot_*` entity — usable in automations
 
 ## Installation
 
@@ -29,23 +29,22 @@ Custom Lovelace card for Home Assistant — manage contracts and subscriptions d
 1. Copy `pactpilot-card.js` to `/config/www/pactpilot-card.js`
 2. Add Lovelace resource: `/local/pactpilot-card.js` (type: JavaScript Module)
 
-### Required: AppDaemon backend for long details
+### Required: AppDaemon backend
 
-Long Markdown details need one-time setup because Home Assistant's `state` field is limited to 255 characters.
+PactPilot needs one-time AppDaemon setup because Home Assistant's entity `state` is limited to 255 characters. The card stores **all** contract data in a single sensor per contract, with the long Markdown details living in an attribute.
 
 1. Install the **AppDaemon 4** add-on from the Home Assistant add-on store.
-2. Copy `apps/pactpilot_details.py` to your AppDaemon `apps/` folder
+2. Copy `apps/pactpilot_backend.py` to your AppDaemon `apps/` folder
    (usually `/config/appdaemon/apps/` or `/config/addons_config/a0d7b954_appdaemon/apps/`).
 3. Register the app in `apps.yaml`:
    ```yaml
-   pactpilot_details:
-     module: pactpilot_details
-     class: PactPilotDetails
+   pactpilot_backend:
+     module: pactpilot_backend
+     class: PactPilotBackend
    ```
 4. Restart AppDaemon.
 
-AppDaemon will then create sensors like `sensor.pactpilot_<contract>_details`
-with the long Markdown stored in the `markdown` attribute.
+AppDaemon will then create sensors like `sensor.pactpilot_<contract>` with all contract data in attributes and the long Markdown stored in the `markdown` attribute.
 
 ## Configuration
 
@@ -53,14 +52,13 @@ with the long Markdown stored in the `markdown` attribute.
 type: custom:pactpilot-card
 # All fields below are optional:
 categories: []       # Custom categories (overrides defaults)
-default_view: grid   # "grid" (default)
 ```
 
-Contracts are auto-discovered — any `input_text` helper with label `pactpilot` is shown.
+Contracts are auto-discovered — any `sensor.pactpilot_*` entity with a `name` attribute is shown.
 
 ## Creating Contracts
 
-Click **＋ Neu** in the card header. Fill in the form and save. The card creates an `input_text` helper with your contract data as YAML.
+Click **＋ Neu** in the card header. Fill in the form and save. The card fires an event that the AppDaemon backend turns into a sensor.
 
 ## Automation Example
 
@@ -69,11 +67,10 @@ alias: "PactPilot — Payment Due Warning"
 trigger:
   - platform: template
     value_template: >
-      {% for e in states.input_text
-           | selectattr('entity_id', 'search', 'input_text.pactpilot_') %}
-        {% set data = e.state | from_yaml %}
-        {% if data.next_payment
-              and (data.next_payment | as_datetime - now()).days == 3 %}
+      {% for e in states.sensor
+           | selectattr('entity_id', 'search', 'sensor.pactpilot_') %}
+        {% set np = e.attributes.next_payment %}
+        {% if np and (np | as_datetime - now()).days == 3 %}
           true
         {% endif %}
       {% endfor %}
@@ -85,23 +82,21 @@ action:
 
 ## Data Format
 
-Each contract is stored as YAML in an `input_text` entity:
+Each contract is stored as one sensor entity:
 
-```yaml
-name: HUK Car Insurance
-category: Versicherung
-provider: HUK24
-cost: 45.00
-cycle: jährlich
-next_payment: "2026-12-01"
-logo: mdi:car
-url: https://huk24.de
-status: active
-
-# Details are stored by AppDaemon in:
-# sensor.pactpilot_<name>_details
-# attribute: markdown
-```
+| Sensor | Example |
+|--------|---------|
+| Entity | `sensor.pactpilot_netflix` |
+| State | `active` (status) |
+| `name` | Netflix |
+| `category` | Streaming |
+| `provider` | Netflix Inc. |
+| `cost` | 12.99 |
+| `cycle` | monatlich |
+| `next_payment` | 2026-08-15 |
+| `logo` | mdi:television |
+| `url` | https://netflix.com/manage |
+| `markdown` | long Markdown details |
 
 ## License
 

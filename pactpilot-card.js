@@ -1,4 +1,4 @@
-// PactPilot Card for Home Assistant — version 1.0.8
+// PactPilot Card for Home Assistant — version 1.0.9
 class PactPilotCard extends HTMLElement {
   constructor() {
     super();
@@ -60,7 +60,7 @@ class PactPilotCard extends HTMLElement {
     if (!hass) return;
     // Home Assistant calls set hass on every state update. Re-rendering the entire
     // grid each time replaces the DOM under the user's cursor and can swallow clicks.
-    // Only re-render when a PactPilot-related entity (contract or detail chunk) changes.
+    // Only re-render when a PactPilot contract sensor changes.
     const newHash = this._computeStateHash(hass);
     if (this._stateHash === newHash) return;
     this._stateHash = newHash;
@@ -76,7 +76,7 @@ class PactPilotCard extends HTMLElement {
   _computeStateHash(hass) {
     const parts = [];
     for (const [entityId, stateObj] of Object.entries(hass.states || {})) {
-      if (entityId.startsWith('input_text.pactpilot_') || entityId.startsWith('sensor.pactpilot_')) {
+      if (entityId.startsWith('sensor.pactpilot_') && !entityId.endsWith('_details')) {
         parts.push(`${entityId}=${stateObj?.state || ''}:${stateObj?.last_updated || ''}:${stateObj?.last_changed || ''}`);
       }
     }
@@ -275,60 +275,31 @@ class PactPilotCard extends HTMLElement {
   }
 
   _contractSlug(entityId) {
-    const match = entityId.match(/^input_text\.pactpilot_(.+)$/);
+    const match = entityId.match(/^sensor\.pactpilot_(.+)$/);
     return match ? match[1] : null;
-  }
-
-  _detailsSensorId(slug) {
-    return `sensor.pactpilot_${slug}_details`;
-  }
-
-  _readDetails(slug) {
-    if (!this._hass || !slug) return '';
-    const sensorId = this._detailsSensorId(slug);
-    const attr = this._hass.states[sensorId]?.attributes?.markdown;
-    return typeof attr === 'string' ? attr : '';
-  }
-
-  _writeDetails(slug, details, entityId) {
-    if (!slug) return;
-    // Fire an event for the AppDaemon backend. AppDaemon creates/updates a
-    // sensor.pactpilot_<slug>_details entity with the long markdown in an attribute,
-    // bypassing Home Assistant's 255-character state limit.
-    const event = new CustomEvent('pactpilot_details_save', {
-      detail: { slug, details: details || '', entity_id: entityId || `input_text.pactpilot_${slug}` }
-    });
-    window.dispatchEvent(event);
-  }
-
-  _deleteDetails(slug) {
-    if (!slug) return;
-    const event = new CustomEvent('pactpilot_details_delete', {
-      detail: { slug }
-    });
-    window.dispatchEvent(event);
   }
 
   _getContracts() {
     if (!this._hass) return [];
     const contracts = [];
     for (const [entityId, stateObj] of Object.entries(this._hass.states)) {
-      if (!entityId.startsWith('input_text.pactpilot_')) continue;
-      // The AppDaemon backend stores details in a separate sensor attribute.
-      try {
-        const data = PactPilotCard.parseYaml(stateObj.state);
-        if (!data || !data.name) continue;
-        const slug = this._contractSlug(entityId);
-        const details = slug ? this._readDetails(slug) : '';
-        contracts.push({
-          entity_id: entityId,
-          ...data,
-          details: details || data.details || '',
-          cost: parseFloat(data.cost) || 0
-        });
-      } catch (e) {
-        continue;
-      }
+      // AppDaemon stores each contract as one sensor. Skip legacy detail-only sensors.
+      if (!entityId.startsWith('sensor.pactpilot_') || entityId.endsWith('_details')) continue;
+      const attrs = stateObj?.attributes || {};
+      if (!attrs.name) continue;
+      contracts.push({
+        entity_id: entityId,
+        name: attrs.name,
+        category: attrs.category || 'Sonstiges',
+        provider: attrs.provider || '',
+        cost: parseFloat(attrs.cost) || 0,
+        cycle: attrs.cycle || 'monatlich',
+        next_payment: attrs.next_payment || '',
+        logo: attrs.logo || '',
+        url: attrs.url || '',
+        details: attrs.markdown || '',
+        status: stateObj.state || 'active'
+      });
     }
     // Sort: active first, then pending, then cancelled; then by next_payment date; then by name
     const STATUS_ORDER = { active: 0, pending: 1, cancelled: 2 };
@@ -341,68 +312,6 @@ class PactPilotCard extends HTMLElement {
       return a.name.localeCompare(b.name);
     });
     return contracts;
-  }
-
-  static parseYaml(str) {
-    if (!str || typeof str !== 'string') return null;
-    try {
-      // Simple YAML parser for our flat structure
-      const result = {};
-      const lines = str.split('\n');
-      let currentKey = null;
-      let multilineValue = [];
-      let inMultiline = false;
-
-      for (const line of lines) {
-        if (inMultiline) {
-          if (line.startsWith('  ') || line.startsWith('\t') || line === '') {
-            multilineValue.push(line.replace(/^  /, ''));
-            continue;
-          } else {
-            result[currentKey] = multilineValue.join('\n').trim();
-            multilineValue = [];
-            inMultiline = false;
-            currentKey = null;
-            // Fall through to re-process this line as a key-value pair
-          }
-        }
-
-        // Find colon, skipping those inside quotes
-        let colonIdx = -1;
-        let inQuote = false;
-        let quoteChar = '';
-        for (let i = 0; i < line.length; i++) {
-          const ch = line[i];
-          if (inQuote) {
-            if (ch === quoteChar) inQuote = false;
-          } else if (ch === '"' || ch === "'") {
-            inQuote = true;
-            quoteChar = ch;
-          } else if (ch === ':') {
-            colonIdx = i;
-            break;
-          }
-        }
-
-        if (colonIdx > 0 && !inMultiline) {
-          const key = line.substring(0, colonIdx).trim();
-          const value = line.substring(colonIdx + 1).trim();
-          if (value === '|' || value === '|-' || value === '>') {
-            currentKey = key;
-            multilineValue = [];
-            inMultiline = true;
-          } else {
-            result[key] = value.replace(/^"(.*)"$/, '$1').replace(/^'(.*)'$/, '$1');
-          }
-        }
-      }
-      if (inMultiline && currentKey) {
-        result[currentKey] = multilineValue.join('\n').trim();
-      }
-      return result;
-    } catch (e) {
-      return null;
-    }
   }
 
   _slugify(name) {
@@ -420,21 +329,6 @@ class PactPilotCard extends HTMLElement {
     const div = document.createElement('div');
     div.textContent = String(str);
     return div.innerHTML;
-  }
-
-  static yamlQuote(val) {
-    if (val === null || val === undefined) return '""';
-    const s = String(val);
-    // Quote if value contains YAML special characters, leading/trailing space,
-    // is empty, or looks like a boolean/null/number
-    if (/[:\n"'#{}[\],&*?|>%@`!]/.test(s) ||
-        s.startsWith(' ') || s.endsWith(' ') ||
-        s === '' ||
-        /^(true|false|yes|no|on|off|null|~)$/i.test(s) ||
-        /^[0-9.]+$/.test(s)) {
-      return `"${s.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
-    }
-    return s;
   }
 
   _getStyles() {
@@ -1027,28 +921,6 @@ class PactPilotCard extends HTMLElement {
     };
   }
 
-  static toYamlStatic(contract, options = {}) {
-    const q = PactPilotCard.yamlQuote;
-    let yaml = `name: ${q(contract.name)}
-category: ${q(contract.category)}
-provider: ${q(contract.provider)}
-cost: ${contract.cost}
-cycle: ${q(contract.cycle)}
-next_payment: "${contract.next_payment || ''}"
-logo: ${q(contract.logo)}
-status: ${q(contract.status)}`;
-
-    if (contract.url) {
-      yaml += `\nurl: ${q(contract.url)}`;
-    }
-    // Details are stored in separate input_text chunks to bypass the 255-char
-    // input_text limit. Inline details are kept optional for tests/backward compat.
-    if (options.inlineDetails && contract.details) {
-      yaml += `\ndetails: |\n  ${contract.details.replace(/\n/g, '\n  ')}`;
-    }
-    return yaml;
-  }
-
   _ensureFormStatus() {
     let el = this.querySelector('#pp-form-status');
     if (!el) {
@@ -1083,70 +955,40 @@ status: ${q(contract.status)}`;
       saveBtn.textContent = '...';
     }
 
-    // Keep details out of the main YAML; input_text is limited to 255 chars.
-    // Details are stored in separate input_text chunks per contract.
-    const metadataOnly = { ...data, details: '' };
-    const yaml = PactPilotCard.toYamlStatic(metadataOnly);
+    const slug = editContract
+      ? this._contractSlug(editContract.entity_id)
+      : this._slugify(data.name);
 
-    if (yaml.length > 255) {
+    if (!slug) {
       if (saveBtn) {
         saveBtn.disabled = false;
         saveBtn.textContent = this._t('save');
       }
-      this._showFormStatus(`YAML zu lang (${yaml.length}/255 Zeichen). Felder kürzen.`, 'error');
-      console.error('[pactpilot-card] YAML too long for input_text', yaml.length, yaml);
+      this._showFormStatus(this._t('save_error'), 'error');
       return;
     }
 
-    let savedEntityId = editContract ? editContract.entity_id : null;
-
     try {
-      if (editContract) {
-        // Update existing
-        await this._hass.callService('input_text', 'set_value', {
-          entity_id: editContract.entity_id,
-          value: yaml
-        });
-      } else {
-        // Create new — use WebSocket API to create input_text helper
-        try {
-          const result = await this._hass.connection.sendMessagePromise({
-            type: 'input_text/create',
-            name: `PactPilot ${data.name}`,
-            initial: yaml,
-            max: 255,
-            min: 0,
-            mode: 'text'
-          });
-          // Try to assign the pactpilot label to the new entity
-          savedEntityId = typeof result === 'string' ? result : result?.entity_id;
-          if (savedEntityId) {
-            try {
-              await this._hass.connection.sendMessagePromise({
-                type: 'config/entity_registry/update',
-                entity_id: savedEntityId,
-                labels: ['pactpilot']
-              });
-            } catch (labelErr) {
-              // Label assignment is best-effort; entity was created successfully
-            }
-          }
-        } catch (createErr) {
-          // Fallback: fire event for external handler (MCP, automation)
-          const slug = this._slugify(data.name);
-          savedEntityId = `input_text.pactpilot_${slug}`;
-          const event = new CustomEvent('pactpilot-create', {
-            detail: { name: data.name, slug, value: yaml }
-          });
-          window.dispatchEvent(event);
+      // Fire event for the AppDaemon backend. It creates/updates one sensor
+      // per contract with all data in attributes and long Markdown in the
+      // markdown attribute, bypassing HA's 255-character state limit.
+      const event = new CustomEvent('pactpilot_save', {
+        detail: {
+          slug,
+          entity_id: editContract ? editContract.entity_id : `sensor.pactpilot_${slug}`,
+          name: data.name,
+          category: data.category,
+          provider: data.provider,
+          cost: data.cost,
+          cycle: data.cycle,
+          next_payment: data.next_payment,
+          logo: data.logo,
+          url: data.url,
+          status: data.status,
+          details: data.details
         }
-      }
-
-      // Persist the (possibly long) details via AppDaemon backend sensor attribute.
-      if (savedEntityId) {
-        const slug = this._contractSlug(savedEntityId) || this._slugify(data.name);
-        this._writeDetails(slug, data.details, savedEntityId);
-      }
+      });
+      window.dispatchEvent(event);
     } catch (e) {
       if (saveBtn) {
         saveBtn.disabled = false;
@@ -1168,45 +1010,24 @@ status: ${q(contract.status)}`;
   }
 
   async _deleteContract(contract) {
-    let contractDeleted = false;
-    let fallbackFired = false;
+    const slug = this._contractSlug(contract.entity_id);
+    if (!slug) {
+      this._render('grid');
+      return;
+    }
 
-    // Delete the contract entity
+    // Notify the AppDaemon backend to remove the contract sensor.
+    // It owns the entity creation/removal so the card never writes directly.
     try {
-      await this._hass.connection.sendMessagePromise({
-        type: 'config/entity_registry/remove',
-        entity_id: contract.entity_id
-      });
-      contractDeleted = true;
-    } catch (e) {
-      // Fallback: fire event for MCP-based deletion
-      const event = new CustomEvent('pactpilot-delete', {
-        detail: { entity_id: contract.entity_id }
+      const event = new CustomEvent('pactpilot_delete', {
+        detail: { slug, entity_id: contract.entity_id }
       });
       window.dispatchEvent(event);
-      fallbackFired = true;
-    }
-
-    // Also notify AppDaemon backend to remove the details sensor.
-    const slug = this._contractSlug(contract.entity_id);
-    if (slug) {
-      this._deleteDetails(slug);
-    }
-
-    // Also try to remove associated template sensor
-    const sensorId = contract.entity_id.replace('input_text.pactpilot_', 'sensor.pactpilot_faellig_');
-    try {
-      await this._hass.connection.sendMessagePromise({
-        type: 'config/entity_registry/remove',
-        entity_id: sensorId
-      });
     } catch (e) {
-      // Sensor might not exist — ignore
+      console.error('[pactpilot-card] delete event failed', e);
     }
 
-    if (contractDeleted || fallbackFired) {
-      this._render('grid');
-    }
+    this._render('grid');
   }
 
   _computeMonthlyCost(contract) {
