@@ -20,7 +20,17 @@ class PactPilotCard extends HTMLElement {
       this._container = document.createElement('div');
       this._container.className = 'pp-container';
       this.appendChild(this._container);
+      // One stable delegated click listener on the element itself — never re-bound on render.
+      this._clickHandler = this._handleClick.bind(this);
+      this.addEventListener('click', this._clickHandler);
       if (this._hass) this._render();
+    }
+  }
+
+  disconnectedCallback() {
+    if (this._clickHandler) {
+      this.removeEventListener('click', this._clickHandler);
+      this._clickHandler = null;
     }
   }
 
@@ -45,6 +55,63 @@ class PactPilotCard extends HTMLElement {
     } catch (e) {
       const target = this._container || this;
       target.innerHTML = `<ha-card>Error: ${e.message}</ha-card>`;
+    }
+  }
+
+  _handleClick(e) {
+    // Grid view handlers
+    const pill = e.target.closest('.pp-pill');
+    if (pill && this._view === 'grid') {
+      this._activeCategory = pill.dataset.category;
+      this._render('grid');
+      return;
+    }
+
+    const tile = e.target.closest('.pp-tile');
+    if (tile && this._view === 'grid') {
+      const entityId = tile.dataset.entity;
+      const contract = this._getContracts().find(c => c.entity_id === entityId);
+      if (contract) this._render('detail', contract);
+      return;
+    }
+
+    const addBtn = e.target.closest('#pp-add-btn');
+    if (addBtn && this._view === 'grid') {
+      this._render('form');
+      return;
+    }
+
+    // Detail view handlers
+    const backBtn = e.target.closest('#pp-back-btn');
+    if (backBtn && this._view === 'detail') {
+      this._render('grid');
+      return;
+    }
+
+    const editBtn = e.target.closest('#pp-edit-btn');
+    if (editBtn && this._view === 'detail' && this._viewContract) {
+      this._render('form', this._viewContract);
+      return;
+    }
+
+    const deleteBtn = e.target.closest('#pp-delete-btn');
+    if (deleteBtn && this._view === 'detail' && this._viewContract) {
+      this._confirmDelete(this._viewContract);
+      return;
+    }
+
+    // Form view handlers
+    const cancelBtn = e.target.closest('#pp-form-cancel, #pp-form-cancel-btn');
+    if (cancelBtn && this._view === 'form') {
+      if (this._viewContract) this._render('detail', this._viewContract);
+      else this._render('grid');
+      return;
+    }
+
+    const saveBtn = e.target.closest('#pp-form-save');
+    if (saveBtn && this._view === 'form') {
+      e.preventDefault();
+      this._saveContract(this._viewContract);
     }
   }
 
@@ -163,7 +230,7 @@ class PactPilotCard extends HTMLElement {
     for (const [entityId, stateObj] of Object.entries(this._hass.states)) {
       if (!entityId.startsWith('input_text.pactpilot_')) continue;
       try {
-        const data = this._parseYaml(stateObj.state);
+        const data = PactPilotCard.parseYaml(stateObj.state);
         if (!data || !data.name) continue;
         contracts.push({
           entity_id: entityId,
@@ -187,7 +254,7 @@ class PactPilotCard extends HTMLElement {
     return contracts;
   }
 
-  _parseYaml(str) {
+  static parseYaml(str) {
     if (!str || typeof str !== 'string') return null;
     try {
       // Simple YAML parser for our flat structure
@@ -266,7 +333,7 @@ class PactPilotCard extends HTMLElement {
     return div.innerHTML;
   }
 
-  _yamlQuote(val) {
+  static yamlQuote(val) {
     if (val === null || val === undefined) return '""';
     const s = String(val);
     // Quote if value contains YAML special characters, leading/trailing space,
@@ -525,6 +592,24 @@ class PactPilotCard extends HTMLElement {
         .pp-btn.danger { color: #f44336; border-color: rgba(244,67,54,0.3); }
         .pp-btn.danger:hover { background: rgba(244,67,54,0.08); }
         .pp-form { }
+        .pp-form-status {
+          display: none;
+          padding: 8px 10px;
+          margin-bottom: 12px;
+          border-radius: 6px;
+          font-size: 12px;
+          font-weight: 500;
+        }
+        .pp-form-status.error {
+          background: rgba(244,67,54,0.12);
+          color: #f44336;
+          border: 1px solid rgba(244,67,54,0.3);
+        }
+        .pp-form-status.success {
+          background: rgba(76,175,80,0.12);
+          color: #4caf50;
+          border: 1px solid rgba(76,175,80,0.3);
+        }
         .pp-field { margin-bottom: 12px; }
         .pp-field label {
           display: block;
@@ -585,44 +670,93 @@ class PactPilotCard extends HTMLElement {
     });
   }
 
-  _renderMarkdown(md) {
+  static _inlineMarkdown(text) {
+    return text
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      .replace(/\*(.+?)\*/g, '<em>$1</em>')
+      .replace(/`([^`]+)`/g, '<code>$1</code>')
+      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, linkText, url) => {
+        const safe = /^(https?:|mailto:|\/)/i.test(url) ? url : '#';
+        return `<a href="${safe}" target="_blank" rel="noopener noreferrer">${linkText}</a>`;
+      });
+  }
+
+  static renderMarkdown(md) {
     if (!md || typeof md !== 'string') return '';
 
     // Strip HTML tags from source for security (defense-in-depth)
-    let html = md.replace(/<[^>]*>/g, '');
+    const html = md.replace(/<[^>]*>/g, '');
 
-    html = html
+    const lines = html.split('\n');
+    const blocks = [];
+    let currentList = [];
+    let inParagraph = false;
+
+    const flushList = () => {
+      if (currentList.length) {
+        blocks.push('<ul>' + currentList.map(li => `<li>${li}</li>`).join('') + '</ul>');
+        currentList = [];
+      }
+    };
+
+    const flushParagraph = () => {
+      if (inParagraph) {
+        blocks.push('</p>');
+        inParagraph = false;
+      }
+    };
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const trimmed = line.trim();
+
+      if (trimmed === '') {
+        flushList();
+        flushParagraph();
+        continue;
+      }
+
+      // Horizontal rule
+      if (trimmed === '---') {
+        flushList();
+        flushParagraph();
+        blocks.push('<hr>');
+        continue;
+      }
+
       // Headings
-      .replace(/^### (.+)$/gm, '<h5>$1</h5>')
-      .replace(/^## (.+)$/gm, '<h4>$1</h4>')
-      .replace(/^# (.+)$/gm, '<h3>$1</h3>')
-      // Bold
-      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-      // Italic
-      .replace(/\*(.+?)\*/g, '<em>$1</em>')
-      // Inline code
-      .replace(/`([^`]+)`/g, '<code>$1</code>')
-      // Links — validate protocol, add rel=noopener
-      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, text, url) => {
-        const safe = /^(https?:|mailto:|\/)/i.test(url) ? url : '#';
-        return `<a href="${safe}" target="_blank" rel="noopener noreferrer">${text}</a>`;
-      })
-      // Unordered lists
-      .replace(/^- (.+)$/gm, '<li>$1</li>')
-      // Horizontal rules
-      .replace(/^---$/gm, '<hr>')
-      // Line breaks
-      .replace(/\n\n/g, '</p><p>')
-      .replace(/\n/g, '<br>');
+      const headingMatch = trimmed.match(/^(#{1,3}) (.+)$/);
+      if (headingMatch) {
+        flushList();
+        flushParagraph();
+        const level = headingMatch[1].length;
+        const tag = level === 1 ? 'h3' : (level === 2 ? 'h4' : 'h5');
+        blocks.push(`<${tag}>${PactPilotCard._inlineMarkdown(headingMatch[2])}</${tag}>`);
+        continue;
+      }
 
-    // Wrap each contiguous group of <li> elements in <ul>
-    // Non-greedy, global — fixes greedy match that merged all lists into one
-    html = html.replace(/(?:<li>.*?<\/li>\s*)+/g, (match) => {
-      if (!match.includes('<ul>')) return `<ul>${match}</ul>`;
-      return match;
-    });
+      // List item
+      if (trimmed.startsWith('- ')) {
+        flushParagraph();
+        currentList.push(PactPilotCard._inlineMarkdown(trimmed.substring(2)));
+        continue;
+      }
 
-    return html;
+      // Regular paragraph line
+      if (!inParagraph) {
+        flushList();
+        blocks.push('<p>');
+        inParagraph = true;
+      } else {
+        blocks.push('<br>');
+      }
+      blocks.push(PactPilotCard._inlineMarkdown(line));
+    }
+
+    flushList();
+    flushParagraph();
+
+    return blocks.join('');
   }
 
   _renderDetail(contract) {
@@ -670,13 +804,13 @@ class PactPilotCard extends HTMLElement {
     if (contract.details) {
       html += `<div class="pp-details">
         <h4>${this._t('details_label')}</h4>
-        <div class="pp-markdown">${this._renderMarkdown(contract.details)}</div>
+        <div class="pp-markdown">${PactPilotCard.renderMarkdown(contract.details)}</div>
       </div>`;
     }
 
     html += `<div class="pp-actions">
-      <button class="pp-btn primary" id="pp-edit-btn">${this._t('edit')}</button>
-      <button class="pp-btn danger" id="pp-delete-btn">${this._t('delete')}</button>
+      <button type="button" class="pp-btn primary" id="pp-edit-btn">${this._t('edit')}</button>
+      <button type="button" class="pp-btn danger" id="pp-delete-btn">${this._t('delete')}</button>
     </div>`;
 
     html += `</div>`;
@@ -685,20 +819,7 @@ class PactPilotCard extends HTMLElement {
   }
 
   _bindDetailEvents(contract) {
-    // Single delegated click handler; onclick replaces any previous handler on re-render.
-    this._container.onclick = (e) => {
-      if (e.target.closest('#pp-back-btn')) {
-        this._render('grid');
-        return;
-      }
-      if (e.target.closest('#pp-edit-btn')) {
-        this._render('form', contract);
-        return;
-      }
-      if (e.target.closest('#pp-delete-btn')) {
-        this._confirmDelete(contract);
-      }
-    };
+    // No-op: delegated click handler is attached once on the element in connectedCallback().
   }
 
   _renderForm(editContract = null) {
@@ -769,8 +890,8 @@ class PactPilotCard extends HTMLElement {
         </div>
 
         <div class="pp-actions" style="margin-top:16px">
-          <button class="pp-btn" id="pp-form-cancel-btn">${this._t('cancel')}</button>
-          <button class="pp-btn primary" id="pp-form-save">${this._t('save')}</button>
+          <button type="button" class="pp-btn" id="pp-form-cancel-btn">${this._t('cancel')}</button>
+          <button type="button" class="pp-btn primary" id="pp-form-save">${this._t('save')}</button>
         </div>
       </div>
     </div>`;
@@ -780,16 +901,7 @@ class PactPilotCard extends HTMLElement {
   }
 
   _bindFormEvents(editContract) {
-    this._container.onclick = (e) => {
-      if (e.target.closest('#pp-form-cancel') || e.target.closest('#pp-form-cancel-btn')) {
-        if (editContract) this._render('detail', editContract);
-        else this._render('grid');
-        return;
-      }
-      if (e.target.closest('#pp-form-save')) {
-        this._saveContract(editContract);
-      }
-    };
+    // No-op: delegated click handler is attached once on the element in connectedCallback().
   }
 
   _serializeContract() {
@@ -806,15 +918,16 @@ class PactPilotCard extends HTMLElement {
     };
   }
 
-  _toYaml(contract) {
-    let yaml = `name: ${this._yamlQuote(contract.name)}
-category: ${this._yamlQuote(contract.category)}
-provider: ${this._yamlQuote(contract.provider)}
+  static toYamlStatic(contract) {
+    const q = PactPilotCard.yamlQuote;
+    let yaml = `name: ${q(contract.name)}
+category: ${q(contract.category)}
+provider: ${q(contract.provider)}
 cost: ${contract.cost}
-cycle: ${this._yamlQuote(contract.cycle)}
-next_payment: "${contract.next_payment}"
-logo: ${this._yamlQuote(contract.logo)}
-status: ${this._yamlQuote(contract.status)}`;
+cycle: ${q(contract.cycle)}
+next_payment: "${contract.next_payment || ''}"
+logo: ${q(contract.logo)}
+status: ${q(contract.status)}`;
 
     if (contract.details) {
       yaml += `\ndetails: |\n  ${contract.details.replace(/\n/g, '\n  ')}`;
@@ -822,10 +935,31 @@ status: ${this._yamlQuote(contract.status)}`;
     return yaml;
   }
 
+  _ensureFormStatus() {
+    let el = this.querySelector('#pp-form-status');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'pp-form-status';
+      el.className = 'pp-form-status';
+      const form = this.querySelector('.pp-form');
+      if (form) form.insertBefore(el, form.firstChild);
+    }
+    return el;
+  }
+
+  _showFormStatus(message, type) {
+    const el = this._ensureFormStatus();
+    if (!el) return;
+    el.textContent = message;
+    el.className = 'pp-form-status ' + (type || '');
+    el.style.display = 'block';
+  }
+
   async _saveContract(editContract) {
     const data = this._serializeContract();
+
     if (!data.name) {
-      alert(this._t('name') + ' ' + this._t('validation_required'));
+      this._showFormStatus(this._t('name') + ' ' + this._t('validation_required'), 'error');
       return;
     }
 
@@ -835,7 +969,18 @@ status: ${this._yamlQuote(contract.status)}`;
       saveBtn.textContent = '...';
     }
 
-    const yaml = this._toYaml(data);
+    const yaml = PactPilotCard.toYamlStatic(data);
+
+    // input_text helpers are limited to 255 characters.
+    if (yaml.length > 255) {
+      if (saveBtn) {
+        saveBtn.disabled = false;
+        saveBtn.textContent = this._t('save');
+      }
+      this._showFormStatus(`YAML zu lang (${yaml.length}/255 Zeichen). Details verkürzen.`, 'error');
+      console.error('[pactpilot-card] YAML too long for input_text', yaml.length, yaml);
+      return;
+    }
 
     try {
       if (editContract) {
@@ -882,12 +1027,13 @@ status: ${this._yamlQuote(contract.status)}`;
         saveBtn.disabled = false;
         saveBtn.textContent = this._t('save');
       }
-      alert(this._t('save_error') + ': ' + e.message);
+      this._showFormStatus(this._t('save_error') + ': ' + e.message, 'error');
+      console.error('[pactpilot-card] save failed', e);
       return;
     }
 
-    // Return to grid after save
-    setTimeout(() => this._render('grid'), 500);
+    this._showFormStatus('Gespeichert.', 'success');
+    setTimeout(() => this._render('grid'), 600);
   }
 
   _confirmDelete(contract) {
@@ -989,7 +1135,7 @@ status: ${this._yamlQuote(contract.status)}`;
     let html = `<div class="pp-card">
       <div class="pp-header">
         <h3>${this._t('title')}</h3>
-        <button class="pp-add-btn" id="pp-add-btn">${this._t('new')}</button>
+        <button type="button" class="pp-add-btn" id="pp-add-btn">${this._t('new')}</button>
       </div>
 
       <div class="pp-pills">
@@ -1038,31 +1184,10 @@ status: ${this._yamlQuote(contract.status)}`;
 
     html += `</div>`;
     this._container.innerHTML = html;
-    this._bindEvents();
   }
 
   _bindEvents() {
-    // Single delegated click handler; onclick replaces any previous handler on re-render.
-    this._container.onclick = (e) => {
-      const pill = e.target.closest('.pp-pill');
-      if (pill) {
-        this._activeCategory = pill.dataset.category;
-        this._render('grid');
-        return;
-      }
-
-      const tile = e.target.closest('.pp-tile');
-      if (tile) {
-        const entityId = tile.dataset.entity;
-        const contract = this._getContracts().find(c => c.entity_id === entityId);
-        if (contract) this._render('detail', contract);
-        return;
-      }
-
-      if (e.target.closest('#pp-add-btn')) {
-        this._render('form');
-      }
-    };
+    // No-op: delegated click handler is attached once on the element in connectedCallback().
   }
 
   getCardSize() {
@@ -1070,4 +1195,10 @@ status: ${this._yamlQuote(contract.status)}`;
   }
 }
 
-customElements.define('pactpilot-card', PactPilotCard);
+if (typeof customElements !== 'undefined') {
+  customElements.define('pactpilot-card', PactPilotCard);
+}
+
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = { PactPilotCard };
+}
