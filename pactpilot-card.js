@@ -14,23 +14,28 @@ class PactPilotCard extends HTMLElement {
   }
 
   connectedCallback() {
-    // Inject styles once and create the container when the element is attached.
+    // (Re-)create container if it is missing (e.g. after the element was temporarily detached).
     if (!this._container) {
       this.innerHTML = this._getStyles();
       this._container = document.createElement('div');
       this._container.className = 'pp-container';
       this.appendChild(this._container);
-      // One stable delegated click listener on the element itself — never re-bound on render.
-      this._clickHandler = this._handleClick.bind(this);
-      this.addEventListener('click', this._clickHandler);
-      if (this._hass) this._render();
     }
+    // Always (re-)bind the delegated click listener. If it is already attached,
+    // removeEventListener is a no-op, so this is safe after detach/reattach cycles.
+    if (!this._clickHandler) {
+      this._clickHandler = this._handleClick.bind(this);
+    }
+    this.removeEventListener('click', this._clickHandler);
+    this.addEventListener('click', this._clickHandler);
+    if (this._hass) this._render();
   }
 
   disconnectedCallback() {
+    // Detach the listener, but keep the bound reference so connectedCallback
+    // can re-attach it without creating a new function each time.
     if (this._clickHandler) {
       this.removeEventListener('click', this._clickHandler);
-      this._clickHandler = null;
     }
   }
 
