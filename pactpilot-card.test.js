@@ -39,8 +39,6 @@ global.document = {
     };
   }
 };
-global.window = { dispatchEvent() {} };
-
 const { PactPilotCard } = require('./pactpilot-card.js');
 
 function assertEqual(actual, expected, label) {

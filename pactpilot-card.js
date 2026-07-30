@@ -1,4 +1,4 @@
-// PactPilot Card for Home Assistant — version 1.0.9
+// PactPilot Card for Home Assistant — version 1.0.10
 class PactPilotCard extends HTMLElement {
   constructor() {
     super();
@@ -969,11 +969,18 @@ class PactPilotCard extends HTMLElement {
     }
 
     try {
-      // Fire event for the AppDaemon backend. It creates/updates one sensor
-      // per contract with all data in attributes and long Markdown in the
-      // markdown attribute, bypassing HA's 255-character state limit.
-      const event = new CustomEvent('pactpilot_save', {
-        detail: {
+      // Fire HA event for the AppDaemon backend via the WebSocket API.
+      // Browser CustomEvents never reach HA/AppDaemon; fire_event is the
+      // correct bridge. The backend creates/updates sensor.pactpilot_<slug>
+      // with the contract status as state and all other data (including the
+      // long Markdown) as attributes, bypassing HA's 255-character limit.
+      if (!this._hass?.connection) {
+        throw new Error('No HA connection');
+      }
+      await this._hass.connection.sendMessagePromise({
+        type: 'fire_event',
+        event_type: 'pactpilot_save',
+        event_data: {
           slug,
           entity_id: editContract ? editContract.entity_id : `sensor.pactpilot_${slug}`,
           name: data.name,
@@ -988,7 +995,6 @@ class PactPilotCard extends HTMLElement {
           details: data.details
         }
       });
-      window.dispatchEvent(event);
     } catch (e) {
       if (saveBtn) {
         saveBtn.disabled = false;
@@ -1017,14 +1023,20 @@ class PactPilotCard extends HTMLElement {
     }
 
     // Notify the AppDaemon backend to remove the contract sensor.
-    // It owns the entity creation/removal so the card never writes directly.
+    // Browser events do not cross into HA; fire the HA event via the
+    // WebSocket API so the backend can remove sensor.pactpilot_<slug>.
     try {
-      const event = new CustomEvent('pactpilot_delete', {
-        detail: { slug, entity_id: contract.entity_id }
+      if (!this._hass?.connection) {
+        throw new Error('No HA connection');
+      }
+      await this._hass.connection.sendMessagePromise({
+        type: 'fire_event',
+        event_type: 'pactpilot_delete',
+        event_data: { slug, entity_id: contract.entity_id }
       });
-      window.dispatchEvent(event);
     } catch (e) {
       console.error('[pactpilot-card] delete event failed', e);
+      return;
     }
 
     this._render('grid');
