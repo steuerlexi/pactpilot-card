@@ -1,6 +1,11 @@
 class PactPilotCard extends HTMLElement {
   constructor() {
     super();
+    // Inject styles once — never re-parse CSS on re-renders
+    this.innerHTML = this._getStyles();
+    this._container = document.createElement('div');
+    this._container.className = 'pp-container';
+    this.appendChild(this._container);
   }
 
   setConfig(config) {
@@ -19,7 +24,12 @@ class PactPilotCard extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
-    this._render();
+    try {
+      this._render();
+    } catch (e) {
+      const target = this._container || this;
+      target.innerHTML = `<ha-card>Error: ${e.message}</ha-card>`;
+    }
   }
 
   // i18n: German (default) + English fallback
@@ -53,6 +63,8 @@ class PactPilotCard extends HTMLElement {
         contracts: 'Verträge',
         empty_title: 'Keine Verträge gefunden',
         empty_subtitle: 'In dieser Kategorie gibt es keine Einträge.',
+        validation_required: 'ist erforderlich',
+        save_error: 'Fehler beim Speichern',
         cycles: {
           monatlich: 'monatlich',
           vierteljährlich: 'vierteljährlich',
@@ -88,6 +100,8 @@ class PactPilotCard extends HTMLElement {
         contracts: 'contracts',
         empty_title: 'No contracts found',
         empty_subtitle: 'There are no entries in this category.',
+        validation_required: 'is required',
+        save_error: 'Error saving',
         cycles: {
           monatlich: 'monthly',
           vierteljährlich: 'quarterly',
@@ -111,14 +125,16 @@ class PactPilotCard extends HTMLElement {
     ];
   }
 
+  get _lang() {
+    return (this._hass?.locale?.language === 'de') ? 'de' : 'en';
+  }
+
   _t(key) {
-    const lang = (this._hass && this._hass.locale && this._hass.locale.language === 'de') ? 'de' : 'en';
-    return PactPilotCard.I18N[lang][key] || key;
+    return PactPilotCard.I18N[this._lang][key] || key;
   }
 
   _cycleLabel(cycle) {
-    const lang = (this._hass && this._hass.locale && this._hass.locale.language === 'de') ? 'de' : 'en';
-    return PactPilotCard.I18N[lang].cycles[cycle] || cycle;
+    return PactPilotCard.I18N[this._lang].cycles[cycle] || cycle;
   }
 
   _statusLabel(status) {
@@ -175,9 +191,27 @@ class PactPilotCard extends HTMLElement {
             multilineValue = [];
             inMultiline = false;
             currentKey = null;
+            // Fall through to re-process this line as a key-value pair
           }
         }
-        const colonIdx = line.indexOf(':');
+
+        // Find colon, skipping those inside quotes
+        let colonIdx = -1;
+        let inQuote = false;
+        let quoteChar = '';
+        for (let i = 0; i < line.length; i++) {
+          const ch = line[i];
+          if (inQuote) {
+            if (ch === quoteChar) inQuote = false;
+          } else if (ch === '"' || ch === "'") {
+            inQuote = true;
+            quoteChar = ch;
+          } else if (ch === ':') {
+            colonIdx = i;
+            break;
+          }
+        }
+
         if (colonIdx > 0 && !inMultiline) {
           const key = line.substring(0, colonIdx).trim();
           const value = line.substring(colonIdx + 1).trim();
@@ -210,9 +244,25 @@ class PactPilotCard extends HTMLElement {
   }
 
   _escapeHtml(str) {
+    if (str === null || str === undefined) return '';
     const div = document.createElement('div');
-    div.textContent = str;
+    div.textContent = String(str);
     return div.innerHTML;
+  }
+
+  _yamlQuote(val) {
+    if (val === null || val === undefined) return '""';
+    const s = String(val);
+    // Quote if value contains YAML special characters, leading/trailing space,
+    // is empty, or looks like a boolean/null/number
+    if (/[:\n"'#{}[\],&*?|>%@`!]/.test(s) ||
+        s.startsWith(' ') || s.endsWith(' ') ||
+        s === '' ||
+        /^(true|false|yes|no|on|off|null|~)$/i.test(s) ||
+        /^[0-9.]+$/.test(s)) {
+      return `"${s.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+    }
+    return s;
   }
 
   _getStyles() {
@@ -514,13 +564,18 @@ class PactPilotCard extends HTMLElement {
     if (!dateStr) return '';
     const d = new Date(dateStr);
     if (isNaN(d.getTime())) return dateStr;
-    return d.toLocaleDateString(this._hass?.locale?.language === 'de' ? 'de-DE' : 'en-US', {
+    return d.toLocaleDateString(this._lang === 'de' ? 'de-DE' : 'en-US', {
       day: '2-digit', month: '2-digit', year: 'numeric'
     });
   }
+
   _renderMarkdown(md) {
     if (!md || typeof md !== 'string') return '';
-    let html = md
+
+    // Strip HTML tags from source for security (defense-in-depth)
+    let html = md.replace(/<[^>]*>/g, '');
+
+    html = html
       // Headings
       .replace(/^### (.+)$/gm, '<h5>$1</h5>')
       .replace(/^## (.+)$/gm, '<h4>$1</h4>')
@@ -531,8 +586,11 @@ class PactPilotCard extends HTMLElement {
       .replace(/\*(.+?)\*/g, '<em>$1</em>')
       // Inline code
       .replace(/`([^`]+)`/g, '<code>$1</code>')
-      // Links
-      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>')
+      // Links — validate protocol, add rel=noopener
+      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, text, url) => {
+        const safe = /^(https?:|mailto:|\/)/i.test(url) ? url : '#';
+        return `<a href="${safe}" target="_blank" rel="noopener noreferrer">${text}</a>`;
+      })
       // Unordered lists
       .replace(/^- (.+)$/gm, '<li>$1</li>')
       // Horizontal rules
@@ -541,33 +599,32 @@ class PactPilotCard extends HTMLElement {
       .replace(/\n\n/g, '</p><p>')
       .replace(/\n/g, '<br>');
 
-    // Wrap list items
-    html = html.replace(/(<li>.*<\/li>)/s, (match) => {
+    // Wrap each contiguous group of <li> elements in <ul>
+    // Non-greedy, global — fixes greedy match that merged all lists into one
+    html = html.replace(/(?:<li>.*?<\/li>\s*)+/g, (match) => {
       if (!match.includes('<ul>')) return `<ul>${match}</ul>`;
       return match;
     });
 
-    return `<p>${html}</p>`;
+    return html;
   }
 
   _renderDetail(contract) {
-    let html = this._getStyles();
-
-    html += `<div class="pp-card">
+    let html = `<div class="pp-card">
       <div class="pp-back" id="pp-back-btn">${this._t('back')}</div>
 
       <div class="pp-hero">
         <div class="pp-hero-logo">
           ${contract.logo && contract.logo.startsWith('mdi:')
-            ? `<ha-icon icon="${contract.logo}" style="color:${this._getCategoryColor(contract.category)};--mdc-icon-size:32px"></ha-icon>`
+            ? `<ha-icon icon="${this._escapeHtml(contract.logo)}" style="color:${this._getCategoryColor(contract.category)};--mdc-icon-size:32px"></ha-icon>`
             : contract.logo && (contract.logo.startsWith('http') || contract.logo.startsWith('/'))
-              ? `<img src="${contract.logo}" alt="${contract.name}" style="width:48px;height:48px;object-fit:contain" onerror="this.style.display='none'">`
+              ? `<img src="${this._escapeHtml(contract.logo)}" alt="${this._escapeHtml(contract.name)}" style="width:48px;height:48px;object-fit:contain" onerror="this.style.display='none'">`
               : `<ha-icon icon="${this._getCategoryIcon(contract.category)}" style="color:${this._getCategoryColor(contract.category)};--mdc-icon-size:32px"></ha-icon>`
           }
         </div>
         <div class="pp-hero-info">
-          <h3>${contract.name}</h3>
-          <div class="pp-hero-provider">${contract.provider || ''}</div>
+          <h3>${this._escapeHtml(contract.name)}</h3>
+          <div class="pp-hero-provider">${this._escapeHtml(contract.provider || '')}</div>
           <span class="pp-status-badge ${contract.status}">${this._statusLabel(contract.status)}</span>
         </div>
       </div>
@@ -589,7 +646,7 @@ class PactPilotCard extends HTMLElement {
           <div class="pp-meta-label">${this._t('category_label')}</div>
           <div class="pp-meta-value">
             <ha-icon icon="${this._getCategoryIcon(contract.category)}" style="width:16px;height:16px;margin-right:4px;vertical-align:-3px;color:${this._getCategoryColor(contract.category)}"></ha-icon>
-            ${contract.category}
+            ${this._escapeHtml(contract.category)}
           </div>
         </div>
       </div>`;
@@ -607,7 +664,7 @@ class PactPilotCard extends HTMLElement {
     </div>`;
 
     html += `</div>`;
-    this.innerHTML = html;
+    this._container.innerHTML = html;
     this._bindDetailEvents(contract);
   }
 
@@ -619,11 +676,9 @@ class PactPilotCard extends HTMLElement {
 
   _renderForm(editContract = null) {
     const isEdit = !!editContract;
-    let html = this._getStyles();
-
-    html += `<div class="pp-card">
+    let html = `<div class="pp-card">
       <div class="pp-back" id="pp-form-cancel">${this._t('cancel')}</div>
-      <h3 style="margin:0 0 16px 0;font-size:16px">${isEdit ? '✏️ ' + editContract.name : this._t('new')}</h3>
+      <h3 style="margin:0 0 16px 0;font-size:16px">${isEdit ? '✏️ ' + this._escapeHtml(editContract.name) : this._t('new')}</h3>
 
       <div class="pp-form">
         <div class="pp-field">
@@ -640,7 +695,7 @@ class PactPilotCard extends HTMLElement {
             <label>${this._t('category_label')} *</label>
             <select id="pp-f-category">
               ${this._categories.map(c =>
-                `<option value="${c.id}" ${isEdit && editContract.category === c.id ? 'selected' : ''}>${c.icon ? c.id : c.id}</option>`
+                `<option value="${c.id}" ${isEdit && editContract.category === c.id ? 'selected' : ''}>${c.id}</option>`
               ).join('')}
             </select>
           </div>
@@ -693,7 +748,7 @@ class PactPilotCard extends HTMLElement {
       </div>
     </div>`;
 
-    this.innerHTML = html;
+    this._container.innerHTML = html;
     this._bindFormEvents(editContract);
   }
 
@@ -724,14 +779,14 @@ class PactPilotCard extends HTMLElement {
   }
 
   _toYaml(contract) {
-    let yaml = `name: ${contract.name}
-category: ${contract.category}
-provider: ${contract.provider}
+    let yaml = `name: ${this._yamlQuote(contract.name)}
+category: ${this._yamlQuote(contract.category)}
+provider: ${this._yamlQuote(contract.provider)}
 cost: ${contract.cost}
-cycle: ${contract.cycle}
+cycle: ${this._yamlQuote(contract.cycle)}
 next_payment: "${contract.next_payment}"
-logo: ${contract.logo}
-status: ${contract.status}`;
+logo: ${this._yamlQuote(contract.logo)}
+status: ${this._yamlQuote(contract.status)}`;
 
     if (contract.details) {
       yaml += `\ndetails: |\n  ${contract.details.replace(/\n/g, '\n  ')}`;
@@ -742,7 +797,7 @@ status: ${contract.status}`;
   async _saveContract(editContract) {
     const data = this._serializeContract();
     if (!data.name) {
-      alert(this._t('name') + ' ist erforderlich');
+      alert(this._t('name') + ' ' + this._t('validation_required'));
       return;
     }
 
@@ -762,19 +817,44 @@ status: ${contract.status}`;
           value: yaml
         });
       } else {
-        // Create new — fire event for external handler
-        const slug = this._slugify(data.name);
-        const event = new CustomEvent('pactpilot-create', {
-          detail: { name: data.name, slug, value: yaml }
-        });
-        window.dispatchEvent(event);
+        // Create new — use WebSocket API to create input_text helper
+        try {
+          const result = await this._hass.connection.sendMessagePromise({
+            type: 'input_text/create',
+            name: `PactPilot ${data.name}`,
+            initial: yaml,
+            max: 255,
+            min: 0,
+            mode: 'text'
+          });
+          // Try to assign the pactpilot label to the new entity
+          const newEntityId = typeof result === 'string' ? result : result?.entity_id;
+          if (newEntityId) {
+            try {
+              await this._hass.connection.sendMessagePromise({
+                type: 'config/entity_registry/update',
+                entity_id: newEntityId,
+                labels: ['pactpilot']
+              });
+            } catch (labelErr) {
+              // Label assignment is best-effort; entity was created successfully
+            }
+          }
+        } catch (createErr) {
+          // Fallback: fire event for external handler (MCP, automation)
+          const slug = this._slugify(data.name);
+          const event = new CustomEvent('pactpilot-create', {
+            detail: { name: data.name, slug, value: yaml }
+          });
+          window.dispatchEvent(event);
+        }
       }
     } catch (e) {
       if (saveBtn) {
         saveBtn.disabled = false;
         saveBtn.textContent = this._t('save');
       }
-      alert('Fehler beim Speichern: ' + e.message);
+      alert(this._t('save_error') + ': ' + e.message);
       return;
     }
 
@@ -789,7 +869,8 @@ status: ${contract.status}`;
   }
 
   async _deleteContract(contract) {
-    let deleted = false;
+    let contractDeleted = false;
+    let fallbackFired = false;
 
     // Delete the contract entity
     try {
@@ -797,13 +878,14 @@ status: ${contract.status}`;
         type: 'config/entity_registry/remove',
         entity_id: contract.entity_id
       });
-      deleted = true;
+      contractDeleted = true;
     } catch (e) {
       // Fallback: fire event for MCP-based deletion
       const event = new CustomEvent('pactpilot-delete', {
         detail: { entity_id: contract.entity_id }
       });
       window.dispatchEvent(event);
+      fallbackFired = true;
     }
 
     // Also try to remove associated template sensor
@@ -813,12 +895,11 @@ status: ${contract.status}`;
         type: 'config/entity_registry/remove',
         entity_id: sensorId
       });
-      deleted = true;
     } catch (e) {
       // Sensor might not exist — ignore
     }
 
-    if (deleted) {
+    if (contractDeleted || fallbackFired) {
       this._render('grid');
     }
   }
@@ -835,7 +916,6 @@ status: ${contract.status}`;
 
   _render(view = 'grid', selectedContract = null) {
     if (!this._hass) return;
-    this._currentView = view;
 
     if (view === 'detail' && selectedContract) {
       this._renderDetail(selectedContract);
@@ -846,7 +926,6 @@ status: ${contract.status}`;
       return;
     }
 
-    this._selectedContract = selectedContract;
     this._activeCategory = this._activeCategory || 'Alle';
 
     const contracts = this._getContracts();
@@ -862,9 +941,7 @@ status: ${contract.status}`;
 
     const categories = ['Alle', ...this._categories.map(c => c.id)];
 
-    let html = this._getStyles();
-
-    html += `<div class="pp-card">
+    let html = `<div class="pp-card">
       <div class="pp-header">
         <h3>${this._t('title')}</h3>
         <button class="pp-add-btn" id="pp-add-btn">${this._t('new')}</button>
@@ -892,14 +969,14 @@ status: ${contract.status}`;
             <div class="pp-status-dot ${c.status}"></div>
             <div class="pp-tile-logo">
               ${c.logo && c.logo.startsWith('mdi:')
-                ? `<ha-icon icon="${c.logo}" style="color:${this._getCategoryColor(c.category)}"></ha-icon>`
+                ? `<ha-icon icon="${this._escapeHtml(c.logo)}" style="color:${this._getCategoryColor(c.category)}"></ha-icon>`
                 : c.logo && (c.logo.startsWith('http') || c.logo.startsWith('/'))
-                  ? `<img src="${c.logo}" alt="${c.name}" onerror="this.style.display='none';this.nextElementSibling.style.display=''"><ha-icon icon="${this._getCategoryIcon(c.category)}" style="color:${this._getCategoryColor(c.category)};display:none"></ha-icon>`
+                  ? `<img src="${this._escapeHtml(c.logo)}" alt="${this._escapeHtml(c.name)}" onerror="this.style.display='none';this.nextElementSibling.style.display=''"><ha-icon icon="${this._getCategoryIcon(c.category)}" style="color:${this._getCategoryColor(c.category)};display:none"></ha-icon>`
                   : `<ha-icon icon="${this._getCategoryIcon(c.category)}" style="color:${this._getCategoryColor(c.category)}"></ha-icon>`
               }
             </div>
-            <div class="pp-tile-name">${c.name}</div>
-            <div class="pp-tile-provider">${c.provider || ''}</div>
+            <div class="pp-tile-name">${this._escapeHtml(c.name)}</div>
+            <div class="pp-tile-provider">${this._escapeHtml(c.provider || '')}</div>
             <div class="pp-tile-cost">${c.cost.toFixed(2).replace('.', ',')} €</div>
             <div class="pp-tile-cycle">${this._cycleLabel(c.cycle)}</div>
             ${c.next_payment ? `<div class="pp-tile-date">⏰ ${this._formatDate(c.next_payment)}</div>` : ''}
@@ -915,7 +992,7 @@ status: ${contract.status}`;
     </div>`;
 
     html += `</div>`;
-    this.innerHTML = html;
+    this._container.innerHTML = html;
     this._bindEvents();
   }
 
@@ -928,7 +1005,7 @@ status: ${contract.status}`;
       });
     });
 
-    // Tile clicks → detail view (stub for now)
+    // Tile clicks → detail view
     this.querySelectorAll('.pp-tile').forEach(tile => {
       tile.addEventListener('click', (e) => {
         const entityId = e.currentTarget.dataset.entity;
@@ -937,11 +1014,15 @@ status: ${contract.status}`;
       });
     });
 
-    // Add button (stub for now)
+    // Add button
     const addBtn = this.querySelector('#pp-add-btn');
     if (addBtn) {
       addBtn.addEventListener('click', () => this._render('form'));
     }
+  }
+
+  getCardSize() {
+    return 5;
   }
 }
 
