@@ -9,7 +9,7 @@ Custom Lovelace card for Home Assistant — manage contracts and subscriptions d
 - 📄 Detail view with markdown-formatted contract details
 - ✏️ Full CRUD — create, edit, and delete contracts from the dashboard
 - 🔗 Clickable **URL** field per contract (opens provider page)
-- 📝 Long contract details stored across multiple `input_text` helpers (bypasses the 255-char single-helper limit)
+- 📝 Long contract details stored via AppDaemon in a sensor attribute (bypasses the 255-char state limit)
 - 🖱 Reliable click handling with composed-path routing and render deduplication
 - 🎨 Logo supports all Home Assistant icon packs (`mdi:`, `hue:`, `custom:`, …) plus image URLs
 - 🌐 German + English (auto-detected via HA locale)
@@ -28,6 +28,24 @@ Custom Lovelace card for Home Assistant — manage contracts and subscriptions d
 
 1. Copy `pactpilot-card.js` to `/config/www/pactpilot-card.js`
 2. Add Lovelace resource: `/local/pactpilot-card.js` (type: JavaScript Module)
+
+### Required: AppDaemon backend for long details
+
+Long Markdown details need one-time setup because Home Assistant's `state` field is limited to 255 characters.
+
+1. Install the **AppDaemon 4** add-on from the Home Assistant add-on store.
+2. Copy `apps/pactpilot_details.py` to your AppDaemon `apps/` folder
+   (usually `/config/appdaemon/apps/` or `/config/addons_config/a0d7b954_appdaemon/apps/`).
+3. Register the app in `apps.yaml`:
+   ```yaml
+   pactpilot_details:
+     module: pactpilot_details
+     class: PactPilotDetails
+   ```
+4. Restart AppDaemon.
+
+AppDaemon will then create sensors like `sensor.pactpilot_<contract>_details`
+with the long Markdown stored in the `markdown` attribute.
 
 ## Configuration
 
@@ -80,8 +98,9 @@ logo: mdi:car
 url: https://huk24.de
 status: active
 
-# Details are stored in separate input_text helpers (input_text.pactpilot_<name>_details_*)
-# to support more than 255 characters. They are merged automatically by the card.
+# Details are stored by AppDaemon in:
+# sensor.pactpilot_<name>_details
+# attribute: markdown
 ```
 
 ## License

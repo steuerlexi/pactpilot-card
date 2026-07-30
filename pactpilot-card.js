@@ -1,4 +1,4 @@
-// PactPilot Card for Home Assistant — version 1.0.7
+// PactPilot Card for Home Assistant — version 1.0.8
 class PactPilotCard extends HTMLElement {
   constructor() {
     super();
@@ -76,7 +76,7 @@ class PactPilotCard extends HTMLElement {
   _computeStateHash(hass) {
     const parts = [];
     for (const [entityId, stateObj] of Object.entries(hass.states || {})) {
-      if (entityId.startsWith('input_text.pactpilot_')) {
+      if (entityId.startsWith('input_text.pactpilot_') || entityId.startsWith('sensor.pactpilot_')) {
         parts.push(`${entityId}=${stateObj?.state || ''}:${stateObj?.last_updated || ''}:${stateObj?.last_changed || ''}`);
       }
     }
@@ -279,78 +279,34 @@ class PactPilotCard extends HTMLElement {
     return match ? match[1] : null;
   }
 
-  _detailChunkEntityIds(slug) {
-    const ids = [];
-    for (let i = 0; i < 12; i++) {
-      ids.push(`input_text.pactpilot_${slug}_details_${i}`);
-    }
-    return ids;
+  _detailsSensorId(slug) {
+    return `sensor.pactpilot_${slug}_details`;
   }
 
-  _readDetailChunks(slug) {
+  _readDetails(slug) {
     if (!this._hass || !slug) return '';
-    const ids = this._detailChunkEntityIds(slug);
-    let parts = [];
-    for (const id of ids) {
-      const state = this._hass.states[id]?.state;
-      if (typeof state === 'string') {
-        parts.push(state);
-      }
-    }
-    return parts.join('');
+    const sensorId = this._detailsSensorId(slug);
+    const attr = this._hass.states[sensorId]?.attributes?.markdown;
+    return typeof attr === 'string' ? attr : '';
   }
 
-  async _writeDetailChunks(slug, details) {
-    if (!this._hass || !slug) return;
-    const CHUNK_MAX = 255;
-    const chunks = [];
-    for (let i = 0; i < (details || '').length; i += CHUNK_MAX) {
-      chunks.push(details.substring(i, i + CHUNK_MAX));
-    }
-    const ids = this._detailChunkEntityIds(slug);
-    const existing = {};
-    for (const id of ids) {
-      existing[id] = !!this._hass.states[id];
-    }
-
-    for (let i = 0; i < ids.length; i++) {
-      const id = ids[i];
-      const value = i < chunks.length ? chunks[i] : '';
-      if (value) {
-        if (existing[id]) {
-          await this._hass.callService('input_text', 'set_value', { entity_id: id, value });
-        } else {
-          await this._hass.connection.sendMessagePromise({
-            type: 'input_text/create',
-            name: `PactPilot ${slug} details ${i}`,
-            initial: value,
-            max: CHUNK_MAX,
-            min: 0,
-            mode: 'text'
-          });
-        }
-      } else if (existing[id]) {
-        // Clear unused chunk so old data doesn't leak into shorter notes.
-        await this._hass.callService('input_text', 'set_value', { entity_id: id, value: '' });
-      }
-    }
+  _writeDetails(slug, details, entityId) {
+    if (!slug) return;
+    // Fire an event for the AppDaemon backend. AppDaemon creates/updates a
+    // sensor.pactpilot_<slug>_details entity with the long markdown in an attribute,
+    // bypassing Home Assistant's 255-character state limit.
+    const event = new CustomEvent('pactpilot_details_save', {
+      detail: { slug, details: details || '', entity_id: entityId || `input_text.pactpilot_${slug}` }
+    });
+    window.dispatchEvent(event);
   }
 
-  async _deleteDetailChunks(slug) {
-    if (!this._hass || !slug) return;
-    const ids = this._detailChunkEntityIds(slug);
-    for (const id of ids) {
-      if (this._hass.states[id]) {
-        try {
-          await this._hass.connection.sendMessagePromise({
-            type: 'config/entity_registry/remove',
-            entity_id: id
-          });
-        } catch (e) {
-          // Ignore: registry remove is best-effort.
-        }
-      }
-    }
+  _deleteDetails(slug) {
+    if (!slug) return;
+    const event = new CustomEvent('pactpilot_details_delete', {
+      detail: { slug }
+    });
+    window.dispatchEvent(event);
   }
 
   _getContracts() {
@@ -358,13 +314,12 @@ class PactPilotCard extends HTMLElement {
     const contracts = [];
     for (const [entityId, stateObj] of Object.entries(this._hass.states)) {
       if (!entityId.startsWith('input_text.pactpilot_')) continue;
-      // Skip detail-chunk entities; they are merged into the main contract.
-      if (/_details_\d+$/.test(entityId)) continue;
+      // The AppDaemon backend stores details in a separate sensor attribute.
       try {
         const data = PactPilotCard.parseYaml(stateObj.state);
         if (!data || !data.name) continue;
         const slug = this._contractSlug(entityId);
-        const details = slug ? this._readDetailChunks(slug) : '';
+        const details = slug ? this._readDetails(slug) : '';
         contracts.push({
           entity_id: entityId,
           ...data,
@@ -1187,10 +1142,10 @@ status: ${q(contract.status)}`;
         }
       }
 
-      // Persist the (possibly long) details into separate input_text chunks.
+      // Persist the (possibly long) details via AppDaemon backend sensor attribute.
       if (savedEntityId) {
         const slug = this._contractSlug(savedEntityId) || this._slugify(data.name);
-        await this._writeDetailChunks(slug, data.details);
+        this._writeDetails(slug, data.details, savedEntityId);
       }
     } catch (e) {
       if (saveBtn) {
@@ -1232,10 +1187,10 @@ status: ${q(contract.status)}`;
       fallbackFired = true;
     }
 
-    // Also try to remove associated detail chunks
+    // Also notify AppDaemon backend to remove the details sensor.
     const slug = this._contractSlug(contract.entity_id);
     if (slug) {
-      await this._deleteDetailChunks(slug);
+      this._deleteDetails(slug);
     }
 
     // Also try to remove associated template sensor
