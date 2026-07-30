@@ -34,9 +34,11 @@ Custom Lovelace card for Home Assistant — manage contracts and subscriptions d
 PactPilot needs one-time AppDaemon setup because Home Assistant's entity `state` is limited to 255 characters. The card stores **all** contract data in a single sensor per contract, with the long Markdown details living in an attribute.
 
 1. Install the **AppDaemon 4** add-on from the Home Assistant add-on store.
-2. Copy `apps/pactpilot_backend.py` to your AppDaemon `apps/` folder
-   (usually `/config/appdaemon/apps/` or `/config/addons_config/a0d7b954_appdaemon/apps/`).
-3. Register the app in `apps.yaml`:
+2. Copy `apps/pactpilot_backend.py` to your AppDaemon `apps/` folder.
+   On Home Assistant OS the add-on config folder is usually
+   `/addon_configs/a0d7b954_appdaemon/apps/` (mounted as `/config/apps` inside
+   the AppDaemon container).
+3. Register the app in `apps.yaml` in the same folder:
    ```yaml
    pactpilot_backend:
      module: pactpilot_backend
@@ -44,7 +46,9 @@ PactPilot needs one-time AppDaemon setup because Home Assistant's entity `state`
    ```
 4. Restart AppDaemon.
 
-AppDaemon will then create sensors like `sensor.pactpilot_<contract>` with all contract data in attributes and the long Markdown stored in the `markdown` attribute.
+AppDaemon will then create sensors like `sensor.pactpilot_<contract>` with all
+contract data in attributes and the long Markdown stored in the `markdown`
+attribute.
 
 ## Configuration
 
@@ -58,7 +62,7 @@ Contracts are auto-discovered — any `sensor.pactpilot_*` entity with a `name` 
 
 ## Creating Contracts
 
-Click **＋ Neu** in the card header. Fill in the form and save. The card fires an event that the AppDaemon backend turns into a sensor.
+Click **＋ Neu** in the card header. Fill in the form and save. The card sends a HA WebSocket `fire_event` (`pactpilot_save`) that the AppDaemon backend turns into a sensor. Delete uses the same mechanism (`pactpilot_delete`).
 
 ## Automation Example
 
