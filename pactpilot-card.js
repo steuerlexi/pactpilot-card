@@ -1,11 +1,24 @@
 class PactPilotCard extends HTMLElement {
   constructor() {
     super();
-    // Inject styles once — never re-parse CSS on re-renders
-    this.innerHTML = this._getStyles();
-    this._container = document.createElement('div');
-    this._container.className = 'pp-container';
-    this.appendChild(this._container);
+    // Only initialize state here; DOM manipulation must happen in connectedCallback()
+    // because creating children in a custom element constructor is not allowed.
+    this._container = null;
+    this._hass = null;
+    this.config = {};
+    this._activeCategory = 'Alle';
+    this._customCategories = null;
+  }
+
+  connectedCallback() {
+    // Inject styles once and create the container when the element is attached.
+    if (!this._container) {
+      this.innerHTML = this._getStyles();
+      this._container = document.createElement('div');
+      this._container.className = 'pp-container';
+      this.appendChild(this._container);
+      if (this._hass) this._render();
+    }
   }
 
   setConfig(config) {
@@ -914,8 +927,19 @@ status: ${this._yamlQuote(contract.status)}`;
     }
   }
 
+  _ensureContainer() {
+    if (!this._container) {
+      this.innerHTML = this._getStyles();
+      this._container = document.createElement('div');
+      this._container.className = 'pp-container';
+      this.appendChild(this._container);
+    }
+    return this._container;
+  }
+
   _render(view = 'grid', selectedContract = null) {
     if (!this._hass) return;
+    this._ensureContainer();
 
     if (view === 'detail' && selectedContract) {
       this._renderDetail(selectedContract);
