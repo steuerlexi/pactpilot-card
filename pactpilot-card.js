@@ -9,7 +9,7 @@ class PactPilotCard extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
-    if (!this._rendered) this._render();
+    this._render();
   }
 
   // i18n: German (default) + English fallback
@@ -41,6 +41,8 @@ class PactPilotCard extends HTMLElement {
         contracts_zero: 'Keine Verträge',
         contracts_one: '1 Vertrag',
         contracts: 'Verträge',
+        empty_title: 'Keine Verträge gefunden',
+        empty_subtitle: 'In dieser Kategorie gibt es keine Einträge.',
         cycles: {
           monatlich: 'monatlich',
           vierteljährlich: 'vierteljährlich',
@@ -74,6 +76,8 @@ class PactPilotCard extends HTMLElement {
         contracts_zero: 'No contracts',
         contracts_one: '1 contract',
         contracts: 'contracts',
+        empty_title: 'No contracts found',
+        empty_subtitle: 'There are no entries in this category.',
         cycles: {
           monatlich: 'monthly',
           vierteljährlich: 'quarterly',
@@ -372,7 +376,6 @@ class PactPilotCard extends HTMLElement {
 
   _render(view = 'grid', selectedContract = null) {
     if (!this._hass) return;
-    this._rendered = true;
     this._currentView = view;
     this._selectedContract = selectedContract;
     this._activeCategory = this._activeCategory || 'Alle';
@@ -410,7 +413,8 @@ class PactPilotCard extends HTMLElement {
     if (filtered.length === 0) {
       html += `<div class="pp-empty">
         <div class="pp-empty-icon">📋</div>
-        <p>${this._t('all') === 'Alle' ? 'Keine Verträge gefunden' : 'No contracts found'}</p>
+        <p>${this._t('empty_title')}</p>
+        <p>${this._t('empty_subtitle')}</p>
       </div>`;
     } else {
       html += `<div class="pp-grid">
@@ -421,7 +425,7 @@ class PactPilotCard extends HTMLElement {
               ${c.logo && c.logo.startsWith('mdi:')
                 ? `<ha-icon icon="${c.logo}" style="color:${this._getCategoryColor(c.category)}"></ha-icon>`
                 : c.logo && (c.logo.startsWith('http') || c.logo.startsWith('/'))
-                  ? `<img src="${c.logo}" alt="${c.name}" onerror="this.parentElement.innerHTML='<ha-icon icon=\\'${this._getCategoryIcon(c.category)}\\' style=\\'color:${this._getCategoryColor(c.category)}\\'></ha-icon>'">`
+                  ? `<img src="${c.logo}" alt="${c.name}" onerror="this.style.display='none';this.nextElementSibling.style.display=''"><ha-icon icon="${this._getCategoryIcon(c.category)}" style="color:${this._getCategoryColor(c.category)};display:none"></ha-icon>`
                   : `<ha-icon icon="${this._getCategoryIcon(c.category)}" style="color:${this._getCategoryColor(c.category)}"></ha-icon>`
               }
             </div>
