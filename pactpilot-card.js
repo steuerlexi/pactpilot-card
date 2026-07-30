@@ -4,7 +4,17 @@ class PactPilotCard extends HTMLElement {
   }
 
   setConfig(config) {
-    this.config = config || {};
+    this.config = {
+      categories: null,
+      ...config
+    };
+    if (this.config.categories && Array.isArray(this.config.categories)) {
+      this._customCategories = this.config.categories;
+    }
+  }
+
+  get _categories() {
+    return this._customCategories || PactPilotCard.CATEGORIES;
   }
 
   set hass(hass) {
@@ -120,13 +130,17 @@ class PactPilotCard extends HTMLElement {
     const contracts = [];
     for (const [entityId, stateObj] of Object.entries(this._hass.states)) {
       if (!entityId.startsWith('input_text.pactpilot_')) continue;
-      const data = this._parseYaml(stateObj.state);
-      if (!data || !data.name) continue;
-      contracts.push({
-        entity_id: entityId,
-        ...data,
-        cost: parseFloat(data.cost) || 0
-      });
+      try {
+        const data = this._parseYaml(stateObj.state);
+        if (!data || !data.name) continue;
+        contracts.push({
+          entity_id: entityId,
+          ...data,
+          cost: parseFloat(data.cost) || 0
+        });
+      } catch (e) {
+        continue;
+      }
     }
     // Sort: active first, then pending, then cancelled; then by next_payment date; then by name
     const STATUS_ORDER = { active: 0, pending: 1, cancelled: 2 };
@@ -474,17 +488,25 @@ class PactPilotCard extends HTMLElement {
         }
         .pp-row { display: flex; gap: 10px; }
         .pp-row .pp-field { flex: 1; }
+        @media (prefers-color-scheme: dark) {
+          .pp-markdown code { background: rgba(255,255,255,0.1); }
+        }
+        @media (max-width: 400px) {
+          .pp-grid { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); }
+          .pp-meta { grid-template-columns: 1fr; }
+          .pp-row { flex-direction: column; gap: 0; }
+        }
       </style>
     `;
   }
 
   _getCategoryIcon(categoryId) {
-    const cat = PactPilotCard.CATEGORIES.find(c => c.id === categoryId);
+    const cat = this._categories.find(c => c.id === categoryId);
     return cat ? cat.icon : 'mdi:dots-horizontal';
   }
 
   _getCategoryColor(categoryId) {
-    const cat = PactPilotCard.CATEGORIES.find(c => c.id === categoryId);
+    const cat = this._categories.find(c => c.id === categoryId);
     return cat ? cat.color : '#9e9e9e';
   }
 
@@ -617,7 +639,7 @@ class PactPilotCard extends HTMLElement {
           <div class="pp-field">
             <label>${this._t('category_label')} *</label>
             <select id="pp-f-category">
-              ${PactPilotCard.CATEGORIES.map(c =>
+              ${this._categories.map(c =>
                 `<option value="${c.id}" ${isEdit && editContract.category === c.id ? 'selected' : ''}>${c.icon ? c.id : c.id}</option>`
               ).join('')}
             </select>
@@ -838,7 +860,7 @@ status: ${contract.status}`;
       .filter(c => c.status === 'active')
       .reduce((sum, c) => sum + this._computeMonthlyCost(c), 0);
 
-    const categories = ['Alle', ...PactPilotCard.CATEGORIES.map(c => c.id)];
+    const categories = ['Alle', ...this._categories.map(c => c.id)];
 
     let html = this._getStyles();
 
