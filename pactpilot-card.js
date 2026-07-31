@@ -185,6 +185,8 @@ class PactPilotCard extends HTMLElement {
         category_label: 'Kategorie',
         provider: 'Anbieter',
         owner: 'Eigentümer',
+        customer_number: 'Kundennummer',
+        insurance_number: 'Versicherungsnummer',
         logo: 'Logo / Icon',
         url: 'URL',
         open_url: 'URL öffnen',
@@ -225,6 +227,8 @@ class PactPilotCard extends HTMLElement {
         category_label: 'Category',
         provider: 'Provider',
         owner: 'Owner',
+        customer_number: 'Customer Number',
+        insurance_number: 'Insurance Number',
         logo: 'Logo / Icon',
         url: 'URL',
         open_url: 'Open URL',
@@ -299,6 +303,8 @@ class PactPilotCard extends HTMLElement {
         category: attrs.category || 'Sonstiges',
         provider: attrs.provider || '',
         owner: attrs.owner || '',
+        customer_number: attrs.customer_number || '',
+        insurance_number: attrs.insurance_number || '',
         cost: parseFloat(attrs.cost) || 0,
         cycle: attrs.cycle || 'monatlich',
         next_payment: attrs.next_payment || '',
@@ -806,6 +812,20 @@ class PactPilotCard extends HTMLElement {
         </div>
       </div>`;
 
+    const hasReferenceNumbers = contract.customer_number || contract.insurance_number;
+    if (hasReferenceNumbers) {
+      html += `<div class="pp-meta">
+        ${contract.customer_number ? `<div class="pp-meta-item">
+          <div class="pp-meta-label">${this._t('customer_number')}</div>
+          <div class="pp-meta-value">${this._escapeHtml(contract.customer_number)}</div>
+        </div>` : ''}
+        ${contract.insurance_number ? `<div class="pp-meta-item">
+          <div class="pp-meta-label">${this._t('insurance_number')}</div>
+          <div class="pp-meta-value">${this._escapeHtml(contract.insurance_number)}</div>
+        </div>` : ''}
+      </div>`;
+    }
+
     if (contract.details) {
       html += `<div class="pp-details">
         <h4>${this._t('details_label')}</h4>
@@ -863,6 +883,17 @@ class PactPilotCard extends HTMLElement {
                 `<option value="${o}" ${isEdit && editContract.owner === o ? 'selected' : ''}>${o}</option>`
               ).join('')}
             </select>
+          </div>
+        </div>
+
+        <div class="pp-row">
+          <div class="pp-field">
+            <label>${this._t('customer_number')}</label>
+            <input type="text" id="pp-f-customer-number" value="${isEdit ? this._escapeHtml(editContract.customer_number || '') : ''}" placeholder="z.B. 12345678">
+          </div>
+          <div class="pp-field">
+            <label>${this._t('insurance_number')}</label>
+            <input type="text" id="pp-f-insurance-number" value="${isEdit ? this._escapeHtml(editContract.insurance_number || '') : ''}" placeholder="z.B. VSN-987654">
           </div>
         </div>
 
@@ -932,6 +963,8 @@ class PactPilotCard extends HTMLElement {
       category: this.querySelector('#pp-f-category')?.value || 'Sonstiges',
       provider: this.querySelector('#pp-f-provider')?.value?.trim() || '',
       owner: this.querySelector('#pp-f-owner')?.value || '',
+      customer_number: this.querySelector('#pp-f-customer-number')?.value?.trim() || '',
+      insurance_number: this.querySelector('#pp-f-insurance-number')?.value?.trim() || '',
       cost: parseFloat(this.querySelector('#pp-f-cost')?.value) || 0,
       cycle: this.querySelector('#pp-f-cycle')?.value || 'monatlich',
       next_payment: this.querySelector('#pp-f-next-payment')?.value || '',
@@ -1008,6 +1041,8 @@ class PactPilotCard extends HTMLElement {
           category: data.category,
           provider: data.provider,
           owner: data.owner,
+          customer_number: data.customer_number,
+          insurance_number: data.insurance_number,
           cost: data.cost,
           cycle: data.cycle,
           next_payment: data.next_payment,
