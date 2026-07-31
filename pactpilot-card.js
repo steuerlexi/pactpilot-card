@@ -8,6 +8,7 @@ class PactPilotCard extends HTMLElement {
     this._hass = null;
     this.config = {};
     this._activeCategory = 'Alle';
+    this._activeOwner = 'Alle';
     this._customCategories = null;
     // View state so state updates don't force us back to grid
     this._view = 'grid';
@@ -101,7 +102,11 @@ class PactPilotCard extends HTMLElement {
     // Grid view handlers
     const pill = this._findEventTarget(e, '.pp-pill');
     if (pill && this._view === 'grid') {
-      this._activeCategory = pill.dataset.category;
+      if (pill.dataset.type === 'owner') {
+        this._activeOwner = pill.dataset.owner;
+      } else {
+        this._activeCategory = pill.dataset.category;
+      }
       this._render('grid');
       return;
     }
@@ -196,7 +201,8 @@ class PactPilotCard extends HTMLElement {
         contracts_one: '1 Vertrag',
         contracts: 'Verträge',
         empty_title: 'Keine Verträge gefunden',
-        empty_subtitle: 'In dieser Kategorie gibt es keine Einträge.',
+        empty_subtitle: 'In dieser Auswahl gibt es keine Einträge.',
+        owner_all: 'Alle Eigentümer',
         validation_required: 'ist erforderlich',
         save_error: 'Fehler beim Speichern',
         cycles: {
@@ -238,7 +244,8 @@ class PactPilotCard extends HTMLElement {
         contracts_one: '1 contract',
         contracts: 'contracts',
         empty_title: 'No contracts found',
-        empty_subtitle: 'There are no entries in this category.',
+        empty_subtitle: 'There are no entries in this selection.',
+        owner_all: 'All owners',
         validation_required: 'is required',
         save_error: 'Error saving',
         cycles: {
@@ -402,6 +409,14 @@ class PactPilotCard extends HTMLElement {
         }
         .pp-pill:hover:not(.active) {
           background: var(--secondary-background-color, #f5f5f5);
+        }
+        .pp-owner-pills {
+          margin-top: -8px;
+          margin-bottom: 14px;
+        }
+        .pp-owner-pills .pp-pill {
+          font-size: 11px;
+          padding: 3px 10px;
         }
         .pp-grid {
           display: grid;
@@ -1139,11 +1154,16 @@ class PactPilotCard extends HTMLElement {
     }
 
     this._activeCategory = this._activeCategory || 'Alle';
+    this._activeOwner = this._activeOwner || 'Alle';
 
     const contracts = this._getContracts();
-    const filtered = this._activeCategory === 'Alle'
-      ? contracts
-      : contracts.filter(c => c.category === this._activeCategory);
+    let filtered = contracts;
+    if (this._activeCategory !== 'Alle') {
+      filtered = filtered.filter(c => c.category === this._activeCategory);
+    }
+    if (this._activeOwner !== 'Alle') {
+      filtered = filtered.filter(c => c.owner === this._activeOwner);
+    }
 
     const activeCount = contracts.filter(c => c.status === 'active').length;
     const cancelledCount = contracts.filter(c => c.status === 'cancelled').length;
@@ -1152,6 +1172,7 @@ class PactPilotCard extends HTMLElement {
       .reduce((sum, c) => sum + this._computeMonthlyCost(c), 0);
 
     const categories = ['Alle', ...this._categories.map(c => c.id)];
+    const owners = ['Alle', ...PactPilotCard.OWNERS];
 
     let html = `<div class="pp-card">
       <div class="pp-header">
@@ -1165,6 +1186,15 @@ class PactPilotCard extends HTMLElement {
           const icon = cat === 'Alle' ? '' : this._getCategoryIcon(cat);
           return `<span class="pp-pill${this._activeCategory === cat ? ' active' : ''}"
             data-category="${cat}">${icon ? `<ha-icon icon="${icon}" style="width:14px;height:14px;margin-right:2px;vertical-align:-2px"></ha-icon>` : ''}${cat} (${count})</span>`;
+        }).join('')}
+      </div>
+
+      <div class="pp-pills pp-owner-pills">
+        ${owners.map(owner => {
+          const count = owner === 'Alle' ? contracts.length : contracts.filter(c => c.owner === owner).length;
+          const label = owner === 'Alle' ? this._t('owner_all') : owner;
+          return `<span class="pp-pill${this._activeOwner === owner ? ' active' : ''}"
+            data-type="owner" data-owner="${owner}">${label} (${count})</span>`;
         }).join('')}
       </div>`;
 
