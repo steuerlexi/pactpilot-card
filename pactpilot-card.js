@@ -1,4 +1,4 @@
-// PactPilot Card for Home Assistant — version 1.0.10
+// PactPilot Card for Home Assistant — version 1.1.1
 class PactPilotCard extends HTMLElement {
   constructor() {
     super();
@@ -184,6 +184,7 @@ class PactPilotCard extends HTMLElement {
         next_payment: 'Nächste Fälligkeit',
         category_label: 'Kategorie',
         provider: 'Anbieter',
+        owner: 'Eigentümer',
         logo: 'Logo / Icon',
         url: 'URL',
         open_url: 'URL öffnen',
@@ -223,6 +224,7 @@ class PactPilotCard extends HTMLElement {
         next_payment: 'Next Payment',
         category_label: 'Category',
         provider: 'Provider',
+        owner: 'Owner',
         logo: 'Logo / Icon',
         url: 'URL',
         open_url: 'Open URL',
@@ -256,6 +258,10 @@ class PactPilotCard extends HTMLElement {
       { id: 'Abo', icon: 'mdi:package-variant', color: '#607d8b' },
       { id: 'Sonstiges', icon: 'mdi:dots-horizontal', color: '#9e9e9e' }
     ];
+  }
+
+  static get OWNERS() {
+    return ['Alexander', 'Beata', 'Isabella', 'Noah', 'Klara'];
   }
 
   get _lang() {
@@ -292,6 +298,7 @@ class PactPilotCard extends HTMLElement {
         name: attrs.name,
         category: attrs.category || 'Sonstiges',
         provider: attrs.provider || '',
+        owner: attrs.owner || '',
         cost: parseFloat(attrs.cost) || 0,
         cycle: attrs.cycle || 'monatlich',
         next_payment: attrs.next_payment || '',
@@ -793,6 +800,10 @@ class PactPilotCard extends HTMLElement {
             ${this._escapeHtml(contract.category)}
           </div>
         </div>
+        <div class="pp-meta-item">
+          <div class="pp-meta-label">${this._t('owner')}</div>
+          <div class="pp-meta-value">${this._escapeHtml(contract.owner || '—')}</div>
+        </div>
       </div>`;
 
     if (contract.details) {
@@ -841,6 +852,15 @@ class PactPilotCard extends HTMLElement {
             <select id="pp-f-category">
               ${this._categories.map(c =>
                 `<option value="${c.id}" ${isEdit && editContract.category === c.id ? 'selected' : ''}>${c.id}</option>`
+              ).join('')}
+            </select>
+          </div>
+          <div class="pp-field">
+            <label>${this._t('owner')}</label>
+            <select id="pp-f-owner">
+              <option value="" ${isEdit && !editContract.owner ? 'selected' : ''}>—</option>
+              ${PactPilotCard.OWNERS.map(o =>
+                `<option value="${o}" ${isEdit && editContract.owner === o ? 'selected' : ''}>${o}</option>`
               ).join('')}
             </select>
           </div>
@@ -911,6 +931,7 @@ class PactPilotCard extends HTMLElement {
       name: this.querySelector('#pp-f-name')?.value?.trim() || '',
       category: this.querySelector('#pp-f-category')?.value || 'Sonstiges',
       provider: this.querySelector('#pp-f-provider')?.value?.trim() || '',
+      owner: this.querySelector('#pp-f-owner')?.value || '',
       cost: parseFloat(this.querySelector('#pp-f-cost')?.value) || 0,
       cycle: this.querySelector('#pp-f-cycle')?.value || 'monatlich',
       next_payment: this.querySelector('#pp-f-next-payment')?.value || '',
@@ -986,6 +1007,7 @@ class PactPilotCard extends HTMLElement {
           name: data.name,
           category: data.category,
           provider: data.provider,
+          owner: data.owner,
           cost: data.cost,
           cycle: data.cycle,
           next_payment: data.next_payment,
