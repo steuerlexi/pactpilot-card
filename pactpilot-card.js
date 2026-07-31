@@ -511,11 +511,16 @@ class PactPilotCard extends HTMLElement {
           color: var(--secondary-text-color, #727272);
           cursor: pointer;
           margin-bottom: 16px;
-          display: flex;
+          display: inline-flex;
           align-items: center;
           gap: 4px;
+          padding: 6px 10px;
+          border-radius: 8px;
+          border: 1px solid var(--divider-color, rgba(0,0,0,0.12));
+          background: var(--card-background-color, #fff);
+          transition: all 0.15s;
         }
-        .pp-back:hover { color: var(--primary-text-color, #212121); }
+        .pp-back:hover { background: var(--secondary-background-color, #f5f5f5); color: var(--primary-text-color, #212121); }
         .pp-hero {
           display: flex;
           align-items: center;
