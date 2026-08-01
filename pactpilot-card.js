@@ -1,4 +1,4 @@
-// PactPilot Card for Home Assistant — version 1.1.1
+// PactPilot Card for Home Assistant — version 1.2.0
 class PactPilotCard extends HTMLElement {
   constructor() {
     super();
@@ -39,6 +39,45 @@ class PactPilotCard extends HTMLElement {
     if (this._clickHandler) {
       this.removeEventListener('click', this._clickHandler);
     }
+  }
+
+  async _copyToClipboard(value, label) {
+    if (!value) return;
+    try {
+      await navigator.clipboard.writeText(String(value));
+      this._showToast((label ? label + ' ' : '') + 'kopiert');
+    } catch (err) {
+      // Fallback for contexts without clipboard API.
+      const textarea = document.createElement('textarea');
+      textarea.value = String(value);
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.select();
+      try {
+        document.execCommand('copy');
+        this._showToast((label ? label + ' ' : '') + 'kopiert');
+      } catch (e) {
+        this._showToast('Kopieren fehlgeschlagen', true);
+      }
+      document.body.removeChild(textarea);
+    }
+  }
+
+  _showToast(message, isError = false) {
+    let toast = this.querySelector('.pp-toast');
+    if (!toast) {
+      toast = document.createElement('div');
+      toast.className = 'pp-toast';
+      this.appendChild(toast);
+    }
+    toast.textContent = message;
+    toast.className = 'pp-toast' + (isError ? ' error' : '');
+    toast.style.opacity = '1';
+    if (this._toastTimeout) clearTimeout(this._toastTimeout);
+    this._toastTimeout = setTimeout(() => {
+      toast.style.opacity = '0';
+    }, 1800);
   }
 
   setConfig(config) {
@@ -148,6 +187,14 @@ class PactPilotCard extends HTMLElement {
     if (urlBtn && this._view === 'detail') {
       // Real <a> with target="_blank" should handle itself, but guard for any
       // delegated fallback that still reaches here.
+      return;
+    }
+
+    const copyBtn = this._findEventTarget(e, '.pp-copy-btn');
+    if (copyBtn && this._view === 'detail') {
+      const value = copyBtn.dataset.value || '';
+      const label = copyBtn.dataset.label || '';
+      this._copyToClipboard(value, label);
       return;
     }
 
@@ -320,6 +367,11 @@ class PactPilotCard extends HTMLElement {
     const period = PactPilotCard.CANCELLATION_PERIODS.find(p => p.id === periodId);
     if (!period) return periodId;
     return this._lang === 'de' ? period.label_de : period.label_en;
+  }
+
+  _copyButton(value, label) {
+    if (!value && value !== 0) return '';
+    return `<button type="button" class="pp-copy-btn" data-value="${this._escapeHtml(String(value))}" data-label="${this._escapeHtml(label || '')}" title="Kopieren">📋</button>`;
   }
 
   _monthsFromNow(dateStr, months) {
@@ -765,6 +817,45 @@ class PactPilotCard extends HTMLElement {
         }
         .pp-row { display: flex; gap: 10px; }
         .pp-row .pp-field { flex: 1; }
+        .pp-copy-btn {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          margin-left: 6px;
+          width: 22px;
+          height: 22px;
+          border-radius: 5px;
+          border: 1px solid var(--divider-color, rgba(0,0,0,0.12));
+          background: var(--card-background-color, #fff);
+          color: var(--secondary-text-color, #727272);
+          font-size: 12px;
+          cursor: pointer;
+          vertical-align: middle;
+          transition: all 0.15s;
+          padding: 0;
+        }
+        .pp-copy-btn:hover {
+          background: var(--primary-color, #03a9f4);
+          color: var(--text-primary-color, #fff);
+          border-color: var(--primary-color, #03a9f4);
+        }
+        .pp-toast {
+          position: fixed;
+          bottom: 24px;
+          left: 50%;
+          transform: translateX(-50%);
+          background: rgba(33,33,33,0.92);
+          color: #fff;
+          padding: 10px 18px;
+          border-radius: 8px;
+          font-size: 13px;
+          z-index: 1000;
+          opacity: 0;
+          transition: opacity 0.2s;
+          pointer-events: none;
+          box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+        }
+        .pp-toast.error { background: rgba(244,67,54,0.92); }
         @media (prefers-color-scheme: dark) {
           .pp-markdown code { background: rgba(255,255,255,0.1); }
         }
@@ -896,6 +987,14 @@ class PactPilotCard extends HTMLElement {
   }
 
   _renderDetail(contract) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const period = PactPilotCard.CANCELLATION_PERIODS.find(p => p.id === contract.cancellation_period);
+    const cancelUntil = this._monthsFromNow(contract.contract_end, period?.months || 0);
+    const diffDays = cancelUntil ? Math.floor((cancelUntil - today) / (1000 * 60 * 60 * 24)) : null;
+    const isOverdue = diffDays !== null && diffDays < 0;
+    const isSoon = diffDays !== null && diffDays >= 0 && diffDays <= 30;
+
     let html = `<div class="pp-card">
       <div class="pp-back" id="pp-back-btn">${this._t('back')}</div>
 
@@ -909,8 +1008,8 @@ class PactPilotCard extends HTMLElement {
           }
         </div>
         <div class="pp-hero-info">
-          <h3>${this._escapeHtml(contract.name)}</h3>
-          <div class="pp-hero-provider">${this._escapeHtml(contract.provider || '')}</div>
+          <h3>${this._escapeHtml(contract.name)}${this._copyButton(contract.name, this._t('name'))}</h3>
+          <div class="pp-hero-provider">${this._escapeHtml(contract.provider || '')}${this._copyButton(contract.provider, this._t('provider'))}</div>
           <span class="pp-status-badge ${contract.status}">${this._statusLabel(contract.status)}</span>
         </div>
       </div>
@@ -918,50 +1017,43 @@ class PactPilotCard extends HTMLElement {
       <div class="pp-meta">
         <div class="pp-meta-item">
           <div class="pp-meta-label">${this._t('cost')}</div>
-          <div class="pp-meta-value price">${contract.cost.toFixed(2).replace('.', ',')} €</div>
+          <div class="pp-meta-value price">${contract.cost.toFixed(2).replace('.', ',')} €${this._copyButton(contract.cost.toFixed(2), this._t('cost'))}</div>
         </div>
         <div class="pp-meta-item">
           <div class="pp-meta-label">${this._t('cycle')}</div>
-          <div class="pp-meta-value">${this._cycleLabel(contract.cycle)}</div>
+          <div class="pp-meta-value">${this._cycleLabel(contract.cycle)}${this._copyButton(contract.cycle, this._t('cycle'))}</div>
         </div>
         <div class="pp-meta-item">
           <div class="pp-meta-label">${this._t('next_payment')}</div>
-          <div class="pp-meta-value">${contract.next_payment ? this._formatDate(contract.next_payment) : '—'}</div>
+          <div class="pp-meta-value">${contract.next_payment ? this._formatDate(contract.next_payment) : '—'}${contract.next_payment ? this._copyButton(contract.next_payment, this._t('next_payment')) : ''}</div>
         </div>
         <div class="pp-meta-item">
           <div class="pp-meta-label">${this._t('category_label')}</div>
           <div class="pp-meta-value">
             <ha-icon icon="${this._getCategoryIcon(contract.category)}" style="width:16px;height:16px;margin-right:4px;vertical-align:-3px;color:${this._getCategoryColor(contract.category)}"></ha-icon>
-            ${this._escapeHtml(contract.category)}
+            ${this._escapeHtml(contract.category)}${this._copyButton(contract.category, this._t('category_label'))}
           </div>
         </div>
         <div class="pp-meta-item">
           <div class="pp-meta-label">${this._t('owner')}</div>
-          <div class="pp-meta-value">${this._escapeHtml(contract.owner || '—')}</div>
+          <div class="pp-meta-value">${this._escapeHtml(contract.owner || '—')}${contract.owner ? this._copyButton(contract.owner, this._t('owner')) : ''}</div>
         </div>
       </div>`;
 
     const hasContractEnd = contract.contract_end || contract.cancellation_period !== 'none';
     if (hasContractEnd) {
-      const period = PactPilotCard.CANCELLATION_PERIODS.find(p => p.id === contract.cancellation_period);
-      const cancelUntil = this._monthsFromNow(contract.contract_end, period?.months || 0);
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const diffDays = cancelUntil ? Math.floor((cancelUntil - today) / (1000 * 60 * 60 * 24)) : null;
-      const isOverdue = diffDays !== null && diffDays < 0;
-      const isSoon = diffDays !== null && diffDays >= 0 && diffDays <= 30;
       html += `<div class="pp-meta">
         ${contract.contract_end ? `<div class="pp-meta-item">
           <div class="pp-meta-label">${this._t('contract_end')}</div>
-          <div class="pp-meta-value">${this._formatDate(contract.contract_end)}</div>
+          <div class="pp-meta-value">${this._formatDate(contract.contract_end)}${this._copyButton(contract.contract_end, this._t('contract_end'))}</div>
         </div>` : ''}
         ${contract.cancellation_period && contract.cancellation_period !== 'none' ? `<div class="pp-meta-item">
           <div class="pp-meta-label">${this._t('cancellation_period')}</div>
-          <div class="pp-meta-value">${this._cancellationLabel(contract.cancellation_period)}</div>
+          <div class="pp-meta-value">${this._cancellationLabel(contract.cancellation_period)}${this._copyButton(contract.cancellation_period, this._t('cancellation_period'))}</div>
         </div>` : ''}
         ${cancelUntil ? `<div class="pp-meta-item${isOverdue ? ' pp-warning' : (isSoon ? ' pp-soon' : '')}">
           <div class="pp-meta-label">${this._t('cancel_until')}</div>
-          <div class="pp-meta-value">${this._formatDate(cancelUntil.toISOString().split('T')[0])}${isOverdue ? ' ⚠️' : (isSoon ? ' ⏰' : '')}</div>
+          <div class="pp-meta-value">${this._formatDate(cancelUntil.toISOString().split('T')[0])}${isOverdue ? ' ⚠️' : (isSoon ? ' ⏰' : '')}${this._copyButton(cancelUntil.toISOString().split('T')[0], this._t('cancel_until'))}</div>
         </div>` : ''}
       </div>`;
     }
@@ -971,25 +1063,26 @@ class PactPilotCard extends HTMLElement {
       html += `<div class="pp-meta">
         ${contract.customer_number ? `<div class="pp-meta-item">
           <div class="pp-meta-label">${this._t('customer_number')}</div>
-          <div class="pp-meta-value">${this._escapeHtml(contract.customer_number)}</div>
+          <div class="pp-meta-value">${this._escapeHtml(contract.customer_number)}${this._copyButton(contract.customer_number, this._t('customer_number'))}</div>
         </div>` : ''}
         ${contract.insurance_number ? `<div class="pp-meta-item">
           <div class="pp-meta-label">${this._t('insurance_number')}</div>
-          <div class="pp-meta-value">${this._escapeHtml(contract.insurance_number)}</div>
+          <div class="pp-meta-value">${this._escapeHtml(contract.insurance_number)}${this._copyButton(contract.insurance_number, this._t('insurance_number'))}</div>
         </div>` : ''}
       </div>`;
     }
 
     if (contract.details) {
       html += `<div class="pp-details">
-        <h4>${this._t('details_label')}</h4>
+        <h4>${this._t('details_label')}${this._copyButton(contract.details, this._t('details_label'))}</h4>
         <div class="pp-markdown">${PactPilotCard.renderMarkdown(contract.details)}</div>
       </div>`;
     }
 
     html += `<div class="pp-actions">`;
     if (contract.url) {
-      html += `<a class="pp-btn primary" id="pp-url-btn" href="${this._escapeHtml(contract.url)}" target="_blank" rel="noopener noreferrer">${this._t('open_url')}</a>`;
+      html += `<a class="pp-btn primary" id="pp-url-btn" href="${this._escapeHtml(contract.url)}" target="_blank" rel="noopener noreferrer">${this._t('open_url')}</a>
+        <button type="button" class="pp-btn pp-copy-btn" data-value="${this._escapeHtml(contract.url)}" data-label="${this._escapeHtml(this._t('url'))}">📋 ${this._t('url')}</button>`;
     }
     html += `<button type="button" class="pp-btn${contract.url ? '' : ' primary'}" id="pp-edit-btn">${this._t('edit')}</button>
       <button type="button" class="pp-btn danger" id="pp-delete-btn">${this._t('delete')}</button>
