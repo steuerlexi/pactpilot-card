@@ -206,6 +206,12 @@ class PactPilotCard extends HTMLElement {
         empty_title: 'Keine Verträge gefunden',
         empty_subtitle: 'In dieser Auswahl gibt es keine Einträge.',
         owner_all: 'Alle Eigentümer',
+        runtime_stats: 'Laufzeiten',
+        with_end_date: 'mit Vertragsende',
+        avg_runtime: 'Ø Restlaufzeit',
+        next_cancel: 'Als nächstes kündigen',
+        nothing_to_cancel: 'Aktuell nichts zu kündigen',
+        overdue_cancel: 'Überfällig',
         validation_required: 'ist erforderlich',
         save_error: 'Fehler beim Speichern',
         cycles: {
@@ -252,6 +258,12 @@ class PactPilotCard extends HTMLElement {
         empty_title: 'No contracts found',
         empty_subtitle: 'There are no entries in this selection.',
         owner_all: 'All owners',
+        runtime_stats: 'Runtimes',
+        with_end_date: 'with end date',
+        avg_runtime: 'Avg remaining runtime',
+        next_cancel: 'Cancel next',
+        nothing_to_cancel: 'Nothing to cancel right now',
+        overdue_cancel: 'Overdue',
         validation_required: 'is required',
         save_error: 'Error saving',
         cycles: {
@@ -533,6 +545,66 @@ class PactPilotCard extends HTMLElement {
           color: var(--secondary-text-color, #727272);
         }
         .pp-summary strong { color: var(--primary-text-color, #212121); }
+        .pp-runtime {
+          margin-top: 14px;
+          padding: 12px;
+          border-radius: 10px;
+          background: var(--secondary-background-color, #f5f5f5);
+        }
+        .pp-runtime-title {
+          font-size: 11px;
+          text-transform: uppercase;
+          color: var(--secondary-text-color, #727272);
+          letter-spacing: 0.5px;
+          margin-bottom: 8px;
+        }
+        .pp-runtime-grid {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 10px;
+        }
+        .pp-runtime-item {
+          text-align: center;
+          padding: 8px;
+          border-radius: 8px;
+          background: var(--card-background-color, #fff);
+        }
+        .pp-runtime-value {
+          font-size: 18px;
+          font-weight: 700;
+          color: var(--primary-color, #03a9f4);
+        }
+        .pp-runtime-label {
+          font-size: 10px;
+          color: var(--secondary-text-color, #727272);
+          margin-top: 2px;
+        }
+        .pp-next-cancel {
+          margin-top: 10px;
+          padding: 10px 12px;
+          border-radius: 8px;
+          background: var(--secondary-background-color, #f5f5f5);
+        }
+        .pp-next-cancel.pp-warning { background: rgba(244,67,54,0.12); }
+        .pp-next-cancel.pp-soon { background: rgba(255,152,0,0.12); }
+        .pp-next-cancel-label {
+          font-size: 10px;
+          text-transform: uppercase;
+          color: var(--secondary-text-color, #727272);
+          letter-spacing: 0.5px;
+          margin-bottom: 2px;
+        }
+        .pp-next-cancel-value {
+          font-size: 14px;
+          font-weight: 600;
+        }
+        .pp-next-cancel.pp-warning .pp-next-cancel-value { color: #f44336; }
+        .pp-next-cancel.pp-soon .pp-next-cancel-value { color: #ff9800; }
+        .pp-next-cancel-meta {
+          font-size: 11px;
+          color: var(--secondary-text-color, #727272);
+          margin-top: 2px;
+        }
         .pp-empty {
           text-align: center;
           padding: 40px 20px;
@@ -1257,6 +1329,27 @@ class PactPilotCard extends HTMLElement {
       .filter(c => c.status === 'active')
       .reduce((sum, c) => sum + this._computeMonthlyCost(c), 0);
 
+    // Runtime statistics and next cancellation deadline across all active contracts.
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const withEndDate = contracts.filter(c => c.status === 'active' && c.contract_end);
+    const avgRuntimeMonths = withEndDate.length
+      ? withEndDate.reduce((sum, c) => {
+          const end = new Date(c.contract_end);
+          const months = (end.getFullYear() - today.getFullYear()) * 12 + (end.getMonth() - today.getMonth());
+          return sum + Math.max(0, months);
+        }, 0) / withEndDate.length
+      : 0;
+    const cancelDeadlines = contracts
+      .filter(c => c.status === 'active' && c.contract_end && c.cancellation_period && c.cancellation_period !== 'none')
+      .map(c => {
+        const period = PactPilotCard.CANCELLATION_PERIODS.find(p => p.id === c.cancellation_period);
+        const until = this._monthsFromNow(c.contract_end, period?.months || 0);
+        return { contract: c, until, diffDays: until ? Math.floor((until - today) / (1000 * 60 * 60 * 24)) : null };
+      })
+      .filter(item => item.until)
+      .sort((a, b) => a.diffDays - b.diffDays);
+
     const categories = ['Alle', ...this._categories.map(c => c.id)];
     const owners = ['Alle', ...PactPilotCard.OWNERS];
 
@@ -1318,6 +1411,36 @@ class PactPilotCard extends HTMLElement {
       <span>🔴 <strong>${cancelledCount}</strong> ${this._t('cancelled')}</span>
       <span>💰 <strong>${monthlyTotal.toFixed(2).replace('.', ',')} €</strong> ${this._t('monthly_total')}</span>
     </div>`;
+
+    html += `<div class="pp-runtime">
+      <div class="pp-runtime-title">${this._t('runtime_stats')}</div>
+      <div class="pp-runtime-grid">
+        <div class="pp-runtime-item">
+          <div class="pp-runtime-value">${withEndDate.length}</div>
+          <div class="pp-runtime-label">${this._t('with_end_date')}</div>
+        </div>
+        <div class="pp-runtime-item">
+          <div class="pp-runtime-value">${avgRuntimeMonths.toFixed(1).replace('.', ',')} M</div>
+          <div class="pp-runtime-label">${this._t('avg_runtime')}</div>
+        </div>
+      </div>
+    </div>`;
+
+    if (cancelDeadlines.length) {
+      const next = cancelDeadlines[0];
+      const isOverdue = next.diffDays < 0;
+      const isSoon = next.diffDays >= 0 && next.diffDays <= 30;
+      html += `<div class="pp-next-cancel${isOverdue ? ' pp-warning' : (isSoon ? ' pp-soon' : '')}">
+        <div class="pp-next-cancel-label">${this._t('next_cancel')}</div>
+        <div class="pp-next-cancel-value">${this._escapeHtml(next.contract.name)}</div>
+        <div class="pp-next-cancel-meta">${this._formatDate(next.until.toISOString().split('T')[0])} · ${isOverdue ? this._t('overdue_cancel') + ' ⚠️' : (isSoon ? '⏰ ' + next.diffDays + ' Tage' : next.diffDays + ' Tage')}</div>
+      </div>`;
+    } else {
+      html += `<div class="pp-next-cancel">
+        <div class="pp-next-cancel-label">${this._t('next_cancel')}</div>
+        <div class="pp-next-cancel-meta">${this._t('nothing_to_cancel')}</div>
+      </div>`;
+    }
 
     html += `</div>`;
     this._container.innerHTML = html;
