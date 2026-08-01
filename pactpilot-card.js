@@ -875,8 +875,9 @@ class PactPilotCard extends HTMLElement {
       const cancelUntil = this._monthsFromNow(contract.contract_end, period?.months || 0);
       const today = new Date();
       today.setHours(0, 0, 0, 0);
-      const isOverdue = cancelUntil && cancelUntil <= today;
-      const isSoon = cancelUntil && !isOverdue && (cancelUntil - today) / (1000 * 60 * 60 * 24) <= 30;
+      const diffDays = cancelUntil ? Math.floor((cancelUntil - today) / (1000 * 60 * 60 * 24)) : null;
+      const isOverdue = diffDays !== null && diffDays < 0;
+      const isSoon = diffDays !== null && diffDays >= 0 && diffDays <= 30;
       html += `<div class="pp-meta">
         ${contract.contract_end ? `<div class="pp-meta-item">
           <div class="pp-meta-label">${this._t('contract_end')}</div>
