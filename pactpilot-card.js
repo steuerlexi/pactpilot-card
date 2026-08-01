@@ -187,6 +187,9 @@ class PactPilotCard extends HTMLElement {
         cost: 'Kosten',
         cycle: 'Zyklus',
         next_payment: 'Nächste Fälligkeit',
+        contract_end: 'Vertragsende',
+        cancellation_period: 'Kündigungsfrist',
+        cancel_until: 'Spätestens kündigen bis',
         category_label: 'Kategorie',
         provider: 'Anbieter',
         owner: 'Eigentümer',
@@ -230,6 +233,9 @@ class PactPilotCard extends HTMLElement {
         cost: 'Cost',
         cycle: 'Cycle',
         next_payment: 'Next Payment',
+        contract_end: 'Contract End',
+        cancellation_period: 'Cancellation Period',
+        cancel_until: 'Cancel until',
         category_label: 'Category',
         provider: 'Provider',
         owner: 'Owner',
@@ -275,6 +281,17 @@ class PactPilotCard extends HTMLElement {
     return ['Alexander', 'Beata', 'Isabella', 'Noah', 'Klara'];
   }
 
+  static get CANCELLATION_PERIODS() {
+    return [
+      { id: 'none', label_de: 'keine / nicht kündbar', label_en: 'none / not cancellable', months: 0 },
+      { id: '1m', label_de: '1 Monat', label_en: '1 month', months: 1 },
+      { id: '2m', label_de: '2 Monate', label_en: '2 months', months: 2 },
+      { id: '3m', label_de: '3 Monate', label_en: '3 months', months: 3 },
+      { id: '6m', label_de: '6 Monate', label_en: '6 months', months: 6 },
+      { id: '12m', label_de: '12 Monate', label_en: '12 months', months: 12 }
+    ];
+  }
+
   get _lang() {
     return (this._hass?.locale?.language === 'de') ? 'de' : 'en';
   }
@@ -285,6 +302,20 @@ class PactPilotCard extends HTMLElement {
 
   _cycleLabel(cycle) {
     return PactPilotCard.I18N[this._lang].cycles[cycle] || cycle;
+  }
+
+  _cancellationLabel(periodId) {
+    const period = PactPilotCard.CANCELLATION_PERIODS.find(p => p.id === periodId);
+    if (!period) return periodId;
+    return this._lang === 'de' ? period.label_de : period.label_en;
+  }
+
+  _monthsFromNow(dateStr, months) {
+    if (!dateStr || !months) return null;
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return null;
+    d.setMonth(d.getMonth() - months);
+    return d;
   }
 
   _statusLabel(status) {
@@ -312,6 +343,8 @@ class PactPilotCard extends HTMLElement {
         owner: attrs.owner || '',
         customer_number: attrs.customer_number || '',
         insurance_number: attrs.insurance_number || '',
+        contract_end: attrs.contract_end || '',
+        cancellation_period: attrs.cancellation_period || 'none',
         cost: parseFloat(attrs.cost) || 0,
         cycle: attrs.cycle || 'monatlich',
         next_payment: attrs.next_payment || '',
@@ -608,6 +641,10 @@ class PactPilotCard extends HTMLElement {
         .pp-btn.primary:hover { opacity: 0.85; }
         .pp-btn.danger { color: #f44336; border-color: rgba(244,67,54,0.3); }
         .pp-btn.danger:hover { background: rgba(244,67,54,0.08); }
+        .pp-meta-item.pp-warning { background: rgba(244,67,54,0.12); }
+        .pp-meta-item.pp-warning .pp-meta-value { color: #f44336; }
+        .pp-meta-item.pp-soon { background: rgba(255,152,0,0.12); }
+        .pp-meta-item.pp-soon .pp-meta-value { color: #ff9800; }
         .pp-form { }
         .pp-form-status {
           display: none;
@@ -832,6 +869,30 @@ class PactPilotCard extends HTMLElement {
         </div>
       </div>`;
 
+    const hasContractEnd = contract.contract_end || contract.cancellation_period !== 'none';
+    if (hasContractEnd) {
+      const period = PactPilotCard.CANCELLATION_PERIODS.find(p => p.id === contract.cancellation_period);
+      const cancelUntil = this._monthsFromNow(contract.contract_end, period?.months || 0);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const isOverdue = cancelUntil && cancelUntil <= today;
+      const isSoon = cancelUntil && !isOverdue && (cancelUntil - today) / (1000 * 60 * 60 * 24) <= 30;
+      html += `<div class="pp-meta">
+        ${contract.contract_end ? `<div class="pp-meta-item">
+          <div class="pp-meta-label">${this._t('contract_end')}</div>
+          <div class="pp-meta-value">${this._formatDate(contract.contract_end)}</div>
+        </div>` : ''}
+        ${contract.cancellation_period && contract.cancellation_period !== 'none' ? `<div class="pp-meta-item">
+          <div class="pp-meta-label">${this._t('cancellation_period')}</div>
+          <div class="pp-meta-value">${this._cancellationLabel(contract.cancellation_period)}</div>
+        </div>` : ''}
+        ${cancelUntil ? `<div class="pp-meta-item${isOverdue ? ' pp-warning' : (isSoon ? ' pp-soon' : '')}">
+          <div class="pp-meta-label">${this._t('cancel_until')}</div>
+          <div class="pp-meta-value">${this._formatDate(cancelUntil.toISOString().split('T')[0])}${isOverdue ? ' ⚠️' : (isSoon ? ' ⏰' : '')}</div>
+        </div>` : ''}
+      </div>`;
+    }
+
     const hasReferenceNumbers = contract.customer_number || contract.insurance_number;
     if (hasReferenceNumbers) {
       html += `<div class="pp-meta">
@@ -947,6 +1008,21 @@ class PactPilotCard extends HTMLElement {
           </div>
         </div>
 
+        <div class="pp-row">
+          <div class="pp-field">
+            <label>${this._t('contract_end')}</label>
+            <input type="date" id="pp-f-contract-end" value="${isEdit && editContract.contract_end ? editContract.contract_end : ''}">
+          </div>
+          <div class="pp-field">
+            <label>${this._t('cancellation_period')}</label>
+            <select id="pp-f-cancellation-period">
+              ${PactPilotCard.CANCELLATION_PERIODS.map(p =>
+                `<option value="${p.id}" ${isEdit && editContract.cancellation_period === p.id ? 'selected' : ''}>${this._lang === 'de' ? p.label_de : p.label_en}</option>`
+              ).join('')}
+            </select>
+          </div>
+        </div>
+
         <div class="pp-field">
           <label>${this._t('logo')}</label>
           <input type="text" id="pp-f-logo" value="${isEdit ? this._escapeHtml(editContract.logo || '') : ''}" placeholder="mdi:car oder https://...">
@@ -985,6 +1061,8 @@ class PactPilotCard extends HTMLElement {
       owner: this.querySelector('#pp-f-owner')?.value || '',
       customer_number: this.querySelector('#pp-f-customer-number')?.value?.trim() || '',
       insurance_number: this.querySelector('#pp-f-insurance-number')?.value?.trim() || '',
+      contract_end: this.querySelector('#pp-f-contract-end')?.value || '',
+      cancellation_period: this.querySelector('#pp-f-cancellation-period')?.value || 'none',
       cost: parseFloat(this.querySelector('#pp-f-cost')?.value) || 0,
       cycle: this.querySelector('#pp-f-cycle')?.value || 'monatlich',
       next_payment: this.querySelector('#pp-f-next-payment')?.value || '',
@@ -1063,6 +1141,8 @@ class PactPilotCard extends HTMLElement {
           owner: data.owner,
           customer_number: data.customer_number,
           insurance_number: data.insurance_number,
+          contract_end: data.contract_end,
+          cancellation_period: data.cancellation_period,
           cost: data.cost,
           cycle: data.cycle,
           next_payment: data.next_payment,
