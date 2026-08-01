@@ -1,4 +1,4 @@
-// PactPilot Card for Home Assistant — version 1.2.1
+// PactPilot Card for Home Assistant — version 1.2.2
 class PactPilotCard extends HTMLElement {
   constructor() {
     super();
@@ -534,25 +534,25 @@ class PactPilotCard extends HTMLElement {
         }
         .pp-tile-logo {
           width: 100%;
-          height: 64px;
+          height: 88px;
           border-radius: 8px;
           display: flex;
           align-items: center;
           justify-content: center;
-          font-size: 28px;
+          font-size: 36px;
           margin-bottom: 8px;
           background: var(--secondary-background-color, #f5f5f5);
           overflow: hidden;
         }
         .pp-tile-logo img {
-          width: 56px;
-          height: 56px;
+          width: 76px;
+          height: 76px;
           object-fit: contain;
         }
         .pp-tile-logo ha-icon {
-          --mdc-icon-size: 32px;
-          width: 32px;
-          height: 32px;
+          --mdc-icon-size: 42px;
+          width: 42px;
+          height: 42px;
         }
         .pp-tile-logo * { pointer-events: none; }
         .pp-tile-name {
